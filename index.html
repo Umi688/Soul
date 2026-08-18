@@ -1170,6 +1170,7 @@ html:-webkit-full-screen #app{
 }
 .cal-social-text{
   font-style:italic;
+  color:rgba(26,43,60,0.88);
 }
 /* CONNECTION items */
 .cal-conn-item{
@@ -2552,6 +2553,7 @@ let state = {
   chatSessionId: 0,
   chatSessionStartTime: 0,  // 当前轮对话开始的时间戳（用于顶部时间戳显示）
   isLoading: false,
+  calendarLoading: false,  // 日历/羁绊生成中标志（独立于isLoading，不影响聊天）
   currentTab: 'chat',
   rulesExpanded: true,
   quoteContext: null,
@@ -3381,10 +3383,8 @@ function switchTab(tab) {
 
   if (state.currentTab === tab) return;
 
-  // If something is loading/generating, just switch visibility without re-rendering
-  // This preserves the "generating" state on all tabs
-  if (state.isLoading) {
-    state.currentTab = tab;
+  // 生成中：聊天页正常渲染（不影响聊天），日历/羁绊页只切换可见性（保留加载状态）
+  if (state.calendarLoading && tab !== 'chat') {
     const target = document.getElementById('tab-' + tab);
     target.style.display = 'flex';
     document.querySelectorAll('.tab-content').forEach(el => {
@@ -3393,6 +3393,7 @@ function switchTab(tab) {
     document.querySelectorAll('.nav-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tab);
     });
+    state.currentTab = tab;
     return;
   }
 
@@ -3724,7 +3725,7 @@ function buildModeInstruction(mode) {
     return '\n【当前模式：每日新闻生成】\n规则：\n1. 生成3条新闻简报，风格类似坊间小报的花边新闻。\n2. 新闻应围绕主控角色"' + _dMe + '"和NPC的日常，用夸张、八卦的笔触撰写，但内容基于近期真实经历。\n3. 每条新闻格式严格为：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容\n  - 标题：吸引眼球的新闻标题\n  - 正文：新闻简报，第三人称\n  - 评论：2条读者评论，模拟不同身份的人的发言，可以吐槽、调侃或感慨\n4. 至少一条新闻应与主线剧情事件相关。\n5. 每条新闻占一个区块，区块之间用 === 分隔。\n6. 只输出新闻内容，不加任何说明。\n';
   } else if (mode === 'calendarAll') {
     const _aMe = (state.data.characters.me.name || '').trim() || '主控';
-    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。记录主控"' + _aMe + '"与各NPC的故事事件和待处理意外，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与各NPC的突发消息、意外状况或生活意外，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现与NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟周围人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。描述该NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名:评论1内容|||评论2路人名:评论2内容|||评论3路人名:评论3内容。类型从"时事热点""业界要文""八卦密谈"三种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 === 分隔）\n\n2. 一律使用人物姓名指代——主控角色用"' + _aMe + '"，NPC用各自的姓名。\n3. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n4. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
+    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。记录主控"' + _aMe + '"与各NPC的故事事件和待处理意外，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与各NPC的突发消息、意外状况或生活意外，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现与NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟周围人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。描述该NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 === 分隔）\n\n2. 一律使用人物姓名指代——主控角色用"' + _aMe + '"，NPC用各自的姓名。\n3. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n4. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -4451,7 +4452,8 @@ function buildGroupMessageHtml(msg, idx, npcs, grp) {
 async function sendGroupChatMessage() {
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('chat-send-btn');
-  if (state.isLoading) return;
+  // 日历生成中允许聊天
+  if (state.isLoading && !state.calendarLoading) return;
   const text = input.value.trim();
 
   const grp = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
@@ -4826,7 +4828,8 @@ async function sendChatMessage() {
   }
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('chat-send-btn');
-  if (state.isLoading) return;
+  // 日历生成中允许聊天（calendarLoading=true时跳过拦截）
+  if (state.isLoading && !state.calendarLoading) return;
   const text = input.value.trim();
   const hasQuote = !!state.quoteContext;
 
@@ -5541,7 +5544,7 @@ function renderCalendarArchivedMonth(container, month) {
 
 // 切换过往日历视图
 function toggleCalendarArchive() {
-  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  if (state.calendarLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.calendarArchiveMode = !state.calendarArchiveMode;
   state.viewingCalendarArchiveMonth = null;
   updateCalendarHeaderButtons();
@@ -5771,7 +5774,8 @@ async function _generateCalendarContent(targetMonth) {
       const comments = [];
       for (let i = 3; i < p.length; i++) {
         const c = p[i];
-        const colonIdx = c.indexOf('：');
+        // 兼容全角和半角冒号
+        const colonIdx = Math.max(c.indexOf('：'), c.indexOf(':'));
         if (colonIdx > 0) {
           comments.push({ author: c.substring(0, colonIdx).trim(), text: c.substring(colonIdx + 1).trim() });
         }
@@ -5795,6 +5799,7 @@ async function generateCalendarAll(targetMonth) {
   const genBtn = document.querySelector('.calendar-gen-btn');
   if (genBtn) genBtn.classList.add('loading');
   state.isLoading = true;
+  state.calendarLoading = true;
 
   const container = document.getElementById('calendar-content');
   if (container) container.innerHTML = `<div class="calendar-loading" style="padding:60px 0;">生成晨报内容中<span class="dots"><span></span><span></span><span></span></span></div>`;
@@ -5812,6 +5817,7 @@ async function generateCalendarAll(targetMonth) {
     showToast('生成失败：' + (e.message || '未知错误'));
   } finally {
     state.isLoading = false;
+    state.calendarLoading = false;
     if (genBtn) genBtn.classList.remove('loading');
     renderCalendar();
   }
@@ -5872,6 +5878,7 @@ async function openCalendarKeyEvent(evtId, archiveMonth) {
 // 生成前置剧情：进入关键事件时AI先生成一段场景铺垫
 async function generateEventPrequel(evt) {
   state.isLoading = true;
+  state.calendarLoading = true;
   state.eventState = 'generating';
   updateCalendarStateUI();
 
@@ -5897,11 +5904,13 @@ async function generateEventPrequel(evt) {
     saveToStorage();
     state.eventState = 'idle';
     state.isLoading = false;
+    state.calendarLoading = false;
     renderMemory();
   } catch (err) {
     console.error('前置剧情生成失败:', err);
     state.eventState = 'idle';
     state.isLoading = false;
+    state.calendarLoading = false;
     renderMemory();
     showToast('前置剧情生成失败，请重试');
   }
@@ -5918,6 +5927,7 @@ async function sendCalendarEventWish() {
   autoResizeInput(input);
 
   state.isLoading = true;
+  state.calendarLoading = true;
   state.eventState = 'generating';
   updateCalendarStateUI();
 
@@ -5956,6 +5966,7 @@ async function sendCalendarEventWish() {
     renderMemoryEventInput();
   } finally {
     state.isLoading = false;
+    state.calendarLoading = false;
     const newInput = document.getElementById('event-input');
     if (newInput) newInput.focus();
   }
@@ -6219,6 +6230,7 @@ async function doRefreshNarrative(evtId, side) {
   if (state.isLoading) return;
 
   state.isLoading = true;
+  state.calendarLoading = true;
   const boxId = side === 'ai' ? `ai-narr-${evtId}` : `player-narr-${evtId}`;
   const box = document.getElementById(boxId);
   if (box) box.innerHTML = `<div class="calendar-loading" style="padding:8px;">重新生成<span class="dots"><span></span><span></span><span></span></span></div>`;
@@ -6300,6 +6312,7 @@ async function doRefreshNarrative(evtId, side) {
     }
   } finally {
     state.isLoading = false;
+    state.calendarLoading = false;
   }
 }
 
@@ -6674,7 +6687,7 @@ function exitArchivedMonth() {
 
 // 切换过往羁绊视图
 function toggleMemoryArchive() {
-  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  if (state.calendarLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.memoryArchiveMode = !state.memoryArchiveMode;
   state.viewingArchiveMonth = null;
   updateMemoryHeaderButtons();
@@ -6700,6 +6713,7 @@ async function saveCalendarKeyEvent() {
   }
 
   state.isLoading = true;
+  state.calendarLoading = true;
   state.eventState = 'generating';
   updateMemoryHeaderButtons();
   renderMemory();
@@ -6744,6 +6758,7 @@ async function saveCalendarKeyEvent() {
 
     saveToStorage();
     state.isLoading = false;
+    state.calendarLoading = false;
     state.eventState = 'readonly';
 
     // 渲染带总结的事件视图，保存按钮隐藏，用返回按钮退出
@@ -6753,6 +6768,7 @@ async function saveCalendarKeyEvent() {
   } catch (err) {
     console.error('事件总结生成失败:', err);
     state.isLoading = false;
+    state.calendarLoading = false;
     state.eventState = 'idle';
     renderMemory();
     showToast('总结生成失败，请重试');
@@ -6788,8 +6804,9 @@ function advanceToNextMonth() {
 }
 
 async function doAdvanceToNextMonth() {
-  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  if (state.isLoading && !state.calendarLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.isLoading = true;
+  state.calendarLoading = true;
   state.eventState = 'generating';
   state.activeCalendarEvent = null;
   state.memoryArchiveMode = false;
@@ -6925,6 +6942,7 @@ async function doAdvanceToNextMonth() {
     showToast('生成失败：' + (e.message || '未知错误'));
   } finally {
     state.isLoading = false;
+    state.calendarLoading = false;
     state.eventState = 'idle';
     const refreshBtn2 = document.getElementById('memory-refresh-btn');
     if (refreshBtn2) refreshBtn2.classList.remove('loading');
