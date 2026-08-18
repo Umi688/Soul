@@ -451,7 +451,9 @@ html:-webkit-full-screen #app{
   background:rgba(232,238,246,0.7);
   backdrop-filter:blur(3px);
   flex-shrink:0;
-  position:relative;
+  position:sticky;
+  bottom:0;
+  z-index:10;
 }
 .input-bar::before{
   content:'';
@@ -2455,17 +2457,7 @@ const DEFAULT_DATA = {
       background: '',
       other: ''
     },
-    npcs: [],  // 所有NPC设定 [{id, name, gender, age, avatar, oneLiner, identity, appearance, personality, background, other}]
-    other: {   // 当前激活NPC的工作副本（兼容现有渲染/AI/记忆逻辑，切换NPC时与 npcs[activeNpcId] 同步）
-      name: '', gender: '', age: '',
-      avatar: '',
-      oneLiner: '',
-      identity: '',
-      appearance: '',
-      personality: '',
-      background: '',
-      other: ''
-    }
+    npcs: []  // 所有NPC设定 [{id, name, gender, age, avatar, oneLiner, identity, appearance, personality, background, other}]
   },
   activeNpcId: '',      // 当前激活的NPC id（对应 characters.npcs 中的某项）
   npcChats: {},         // 非激活NPC的聊天记录 {npcId: [msg,...]}；激活NPC的记录存在 chatHistory
@@ -2513,7 +2505,7 @@ const SCRIPTS = [
     data: {
       characters: {
         me: { name: '', gender: '', age: '', avatar: '', oneLiner: '', identity: '', appearance: '', personality: '', background: '', other: '' },
-        other: { name: '', gender: '', age: '', avatar: '', oneLiner: '', identity: '', appearance: '', personality: '', background: '', other: '' }
+        npcs: []
       },
       rules: [],
       chatHistory: [],
@@ -2674,7 +2666,8 @@ function normalizeNpcModel() {
   if (!d.characters) d.characters = {};
   if (!d.characters.me) d.characters.me = {name:'',gender:'',age:'',avatar:'',oneLiner:'',identity:'',appearance:'',personality:'',background:'',other:''};
   if (!Array.isArray(d.characters.npcs)) d.characters.npcs = [];
-  if (!d.characters.other) d.characters.other = {name:'',gender:'',age:'',avatar:'',oneLiner:'',identity:'',appearance:'',personality:'',background:'',other:''};
+  // 清理旧版工作副本 characters.other（已废弃，直接从 npcs[] 读取激活NPC）
+  if (d.characters.other) delete d.characters.other;
   if (!d.npcChats || typeof d.npcChats !== 'object' || Array.isArray(d.npcChats)) d.npcChats = {};
   if (!Array.isArray(d.calendarEvents)) d.calendarEvents = [];
   if (typeof d.calendarMonth !== 'string') d.calendarMonth = '';
@@ -2696,32 +2689,15 @@ function normalizeNpcModel() {
   if (!d.activeNpcId || !d.characters.npcs.some(n => n.id === d.activeNpcId)) {
     d.activeNpcId = d.characters.npcs.length ? d.characters.npcs[0].id : '';
   }
-
-  // 把激活 NPC 同步到 characters.other（工作副本）
-  syncActiveNpcToOther();
 }
 
-// 将激活 NPC 的设定同步到 characters.other 工作副本
-function syncActiveNpcToOther() {
+// 直接从 npcs[] 获取当前激活的 NPC 对象（替代旧版 characters.other 工作副本）
+// 返回 {} 当没有激活NPC，调用方可安全读取任意字段
+function getActiveNpc() {
   const d = state.data;
-  if (!d.characters) return;
+  if (!d || !d.characters || !Array.isArray(d.characters.npcs)) return {};
   const npc = d.characters.npcs.find(n => n.id === d.activeNpcId);
-  if (!npc) return;
-  const o = d.characters.other || (d.characters.other = {});
-  o.name = npc.name; o.gender = npc.gender; o.age = npc.age; o.avatar = npc.avatar;
-  o.oneLiner = npc.oneLiner; o.identity = npc.identity; o.appearance = npc.appearance;
-  o.personality = npc.personality; o.background = npc.background; o.other = npc.other;
-}
-
-// 将 characters.other 工作副本回写到激活 NPC（编辑后调用）
-function syncOtherToActiveNpc() {
-  const d = state.data;
-  const npc = d.characters.npcs.find(n => n.id === d.activeNpcId);
-  if (!npc) return;
-  const o = d.characters.other || {};
-  npc.name = o.name; npc.gender = o.gender; npc.age = o.age; npc.avatar = o.avatar;
-  npc.oneLiner = o.oneLiner; npc.identity = o.identity; npc.appearance = o.appearance;
-  npc.personality = o.personality; npc.background = o.background; npc.other = o.other;
+  return npc || {};
 }
 
 // 切换激活NPC：保存当前NPC的聊天记录与设定，载入目标NPC
@@ -2732,13 +2708,10 @@ function switchNpcChat(npcId) {
   if (d.activeGroupId) d.activeGroupId = '';
   if (npcId === d.activeNpcId && state.chatView !== 'group') { state.chatView = 'chat'; renderChat(); return; }
   if (state.isLoading) { showToast('正在生成中，请稍后再切换'); return; }
-  // 1. 当前激活NPC的设定回写（other→npcs）
-  syncOtherToActiveNpc();
-  // 2. 当前聊天记录存入 npcChats
+  // 1. 当前聊天记录存入 npcChats（设定已在 npcs[] 中，无需同步）
   if (d.activeNpcId) d.npcChats[d.activeNpcId] = d.chatHistory;
-  // 3. 切换
+  // 2. 切换
   d.activeNpcId = npcId;
-  syncActiveNpcToOther();
   d.chatHistory = d.npcChats[npcId] ? d.npcChats[npcId] : [];
   delete d.npcChats[npcId];
   state.chatSessionId++;       // 新NPC算新一轮会话
@@ -2833,7 +2806,7 @@ function applyChatAvatarVars() {
   if (!state.data || !state.data.characters) return;
   const root = document.documentElement.style;
   const meC = state.data.characters.me || {};
-  const aiC = state.data.characters.other || {};
+  const aiC = getActiveNpc();
   const me = meC.avatar || '';
   const ai = aiC.avatar || '';
   if (me) root.setProperty('--av-me', `url('${me.replace(/'/g, '%27')}')`);
@@ -2942,7 +2915,18 @@ function setupKeyboardHandler() {
         try {
           t.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch(e) {}
+        // Android 某些浏览器（夸克/UC等）scrollIntoView 不生效，用 window.scrollTo 兜底
+        const rect = t.getBoundingClientRect();
+        if (rect.bottom > (window.innerHeight || document.documentElement.clientHeight) - 10) {
+          window.scrollTo(0, document.body.scrollHeight);
+        }
       }, 300);
+      // 额外延迟兜底：部分 Android 键盘弹出动画长达 400-500ms
+      setTimeout(function() {
+        try {
+          t.scrollIntoView({ block: 'center' });
+        } catch(e) {}
+      }, 500);
     }
   });
 
@@ -3164,7 +3148,7 @@ function updateChatHeaderTitle() {
   if (state.chatView === 'list' || !state.data || !state.data.activeNpcId) {
     el.textContent = (profiles && profiles.activeId) ? profileDisplayName(profiles.activeId) : '聊天';
   } else {
-    const name = state.data.characters && state.data.characters.other && state.data.characters.other.name;
+    const name = getActiveNpc().name;
     el.textContent = name || '聊天';
   }
 }
@@ -3571,7 +3555,7 @@ function buildGlobalRulesPrompt() {
   return prompt;
 }
 
-// L4 人设库：characters.me + characters.other（后移至外部规则之后，提升AI读取权重）
+// L4 人设库：characters.me + 全部 characters.npcs[]（后移至外部规则之后，提升AI读取权重）
 function buildCharacterPrompt() {
   const c = state.data.characters;
   let prompt = '\n【角色设定】\n';
@@ -3579,10 +3563,17 @@ function buildCharacterPrompt() {
   const me = c.me;
   prompt += `姓名：${me.name || '未设定'}，性别：${me.gender || '未设定'}，年龄：${me.age || '未设定'}，身份：${me.identity || '未设定'}\n`;
   prompt += `外貌：${me.appearance || '未设定'}\n性格：${me.personality || '未设定'}\n人物背景：${me.background || '未设定'}\n其他设定：${me.other || '无'}\n`;
+  // 全部 NPC 设定注入：遍历 characters.npcs[]，标记当前激活的那个
+  const npcs = Array.isArray(c.npcs) ? c.npcs : [];
   prompt += '--- AI角色（初始状态，可被历史覆盖）---\n';
-  const other = c.other;
-  prompt += `姓名：${other.name || '未设定'}，性别：${other.gender || '未设定'}，年龄：${other.age || '未设定'}，身份：${other.identity || '未设定'}\n`;
-  prompt += `外貌：${other.appearance || '未设定'}\n性格：${other.personality || '未设定'}\n人物背景：${other.background || '未设定'}\n其他设定：${other.other || '无'}\n`;
+  if (npcs.length) {
+    npcs.forEach(npc => {
+      if (!npc.name) return;
+      const active = npc.id === state.data.activeNpcId ? '【当前对话】' : '';
+      prompt += `\n${active}姓名：${npc.name}，性别：${npc.gender || '未设定'}，年龄：${npc.age || '未设定'}，身份：${npc.identity || '未设定'}\n`;
+      prompt += `外貌：${npc.appearance || '未设定'}\n性格：${npc.personality || '未设定'}\n人物背景：${npc.background || '未设定'}\n其他设定：${npc.other || '无'}\n`;
+    });
+  }
   return prompt;
 }
 
@@ -3637,7 +3628,7 @@ function buildHistoryMessages(mode, isContinuation) {
     const recentChats = state.data.chatHistory.slice(-MAX_CROSS);
     if (recentChats.length > 0) {
       const _meName = (state.data.characters.me.name || '').trim() || '主控';
-      const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+      const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
       const chatSummary = recentChats.map(h => {
         const speaker = h.role === 'user' ? _meName : _otherName;
         return `${speaker}：${h.content || ''}`;
@@ -3653,7 +3644,7 @@ function buildHistoryMessages(mode, isContinuation) {
     const recentChats = state.data.chatHistory.slice(-MAX_CROSS);
     if (recentChats.length > 0) {
       const _meName = (state.data.characters.me.name || '').trim() || '主控';
-      const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+      const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
       const chatSummary = recentChats.map(h => {
         const speaker = h.role === 'user' ? _meName : _otherName;
         return `${speaker}：${h.content || ''}`;
@@ -3670,7 +3661,7 @@ function buildHistoryMessages(mode, isContinuation) {
 function buildModeInstruction(mode) {
   if (mode === 'chat') {
     const meName = state.data.characters.me.name || '主控角色';
-    const otherName = state.data.characters.other.name || 'AI角色';
+    const otherName = getActiveNpc().name || 'AI角色';
     return '\n【当前模式：聊天】\n角色分配：你是DM，当前负责扮演NPC"' + otherName + '"与主控角色"' + meName + '"的对话。你的每一条回复都必须且只能以"' + otherName + '"的身份、视角和口吻输出，绝对禁止以主控角色"' + meName + '"的视角发言或代替用户说话。\n规则：\n1. 绝对禁止任何括号旁白、动作描写、心理描写、神态描写、环境描写。例如（他笑了笑）、（喉结动了动）、（声音有点哑）这类全部禁止。只输出对话文字本身。\n2. 回复需综合人设、历史记忆和当前故事状态：以初始人设为底色，以近期互动和记忆卡片中记录的"变化"为当前行为依据。若历史中已出现性格偏移，应延续该偏移，而非回退到初始状态。当前故事状态供你内在感知剧情的发展阶段和近期经历；提供角色此刻的心理和情绪状态，语气和态度应自然地受其影响，像平时发微信一样。\n3. 输出风格：短句、口语化、日常对话，像微信聊天一样自然。\n4. 不主动推进重大剧情，不展开长篇叙述。\n5. 事件叙事和聊天发生在同一时间线上。当前聊天的时刻，就是最近事件叙事结束的那一段。你在聊天中提及事件里的事时，时间表述应与事件叙事保持一致，不要自行推移时间。\n';
   } else if (mode === 'event') {
     return '\n【当前模式：事件叙事】\n规则：\n1.严格使用第三人称叙述。指代主控角色一律使用主控角色的姓名（或"他/她"），指代AI角色一律使用AI角色的姓名（或"他/她"）。全文禁止出现"你""你的""你们"等任何第二人称代词。\n2. 围绕玩家的愿望展开，不要替玩家做重大决定。\n3. 严禁复述或重复上文已出现过的内容（包括润色文本、历史叙事、聊天记录中的任何句子、段落或场景描写）。叙事必须从已有内容的结束处继续推进，只写新的发展。\n4. 叙事应自然延伸当前状态：综合初始人设 + 记忆卡片中的历史变化。若历史已记录角色状态的偏移，叙事中应延续该偏移，不退回初始状态。\n5.若有心理活动：小段插入第一人称或自由间接引语呈现角色当下的内心独白、回忆、矛盾、独白塑造情感冲突（如自责与不甘交织、想追问又克制、甜蜜回忆与当下苦涩对比）。\n6.格式要求：心理活动用「」括起来，对话内容则用""括起来。段落之间用换行分隔，不要挤在一起。\n';
@@ -3678,11 +3669,11 @@ function buildModeInstruction(mode) {
     return '\n【当前模式：润色】\n规则：\n1. 本模式下你不是在扮演AI角色，而是作为第三人称叙事者。叙事视角主体是主控角色。\n2. 玩家输入的是基于主控角色自身角度的剧情愿望、反应或期望的发展。将其润色为以主控为视角焦点的小说风格叙事文段。保留玩家原意的核心。\n3. 严格使用第三人称叙述。玩家输入中的"我"一律替换为主控角色的姓名（或"他/她"），指代AI角色时一律使用AI角色的姓名（或"他/她"）。全文禁止出现"你""你的""你们"等任何第二人称代词。\n4. 润色文本默认应从上条叙事文本或润色文本的结束处自然衔接，延续当前场景和时空。严禁复述或重复上文已出现过的内容。\n5.若有心理活动：小段插入第一人称或自由间接引语呈现角色当下的内心独白、回忆、矛盾、独白塑造情感冲突（如自责与不甘交织、想追问又克制、甜蜜回忆与当下苦涩对比）。\n6.格式要求：心理活动用「」括起来，对话内容用""括起来。段落之间用换行分隔，不要挤在一起。\n7.只输出润色后的文段，不加任何说明。\n';
   } else if (mode === 'memory') {
     const _memMe = (state.data.characters.me.name || '').trim() || '主控';
-    const _memOther = (state.data.characters.other.name || '').trim() || 'AI角色';
+    const _memOther = (getActiveNpc().name || '').trim() || 'AI角色';
     return '\n【当前模式：记忆总结】\n规则：\n1. 根据用户提供的近期聊天记录和事件记录，总结关键信息。\n2. 提取：重要事件、角色关系变化、人物状态演变。尽量保留具体细节，如涉及的人物姓名、具体约定、关键道具、地点、转折点等，不要只写空泛的概括。\n3. 输出格式：一段简洁的摘要，不超过400字。一律使用人物姓名指代——主控角色用"' + _memMe + '"，AI角色用"' + _memOther + '"，不要使用"你""角色"等模糊代词。\n4. 只记录已发生的事实，不加入推测或评价。\n5. 直接输出摘要正文，不要加任何标题、标记或说明（如"记忆总结"等字样一律不要出现）。\n';
   } else if (mode === 'calendarReport') {
     const _rptMe = (state.data.characters.me.name || '').trim() || '主控';
-    const _rptOther = (state.data.characters.other.name || '').trim() || 'AI角色';
+    const _rptOther = (getActiveNpc().name || '').trim() || 'AI角色';
     return '\n【当前模式：晨报生成】\n规则：\n1. 根据提供的本月上下文（事件、对话、故事状态），生成本月故事晨报。\n2. 概述本月主控与各NPC之间的主要事件、关系变化和情感走向，以第三人称叙事风格撰写。\n3. 晨报应围绕主线剧情推进展开——主线进展是叙事的主轴，日常事件是主线的映衬和延展。\n4. 语言精练有质感，像小说的月度回溯。\n5. 一律使用人物姓名指代——主控角色用"' + _rptMe + '"，NPC用各自的姓名。\n6. 只输出晨报正文，不加任何标题、标记或说明。\n';
   } else if (mode === 'calendarMemo') {
     const _mMe = (state.data.characters.me.name || '').trim() || '主控';
@@ -3702,9 +3693,12 @@ function buildModeInstruction(mode) {
   } else if (mode === 'calendarDailyNews') {
     const _dMe = (state.data.characters.me.name || '').trim() || '主控';
     return '\n【当前模式：每日新闻生成】\n规则：\n1. 生成3条新闻简报，风格类似坊间小报的花边新闻。\n2. 新闻应围绕主控角色"' + _dMe + '"和NPC的日常，用夸张、八卦的笔触撰写，但内容基于近期真实经历。\n3. 每条新闻格式严格为：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容\n  - 标题：吸引眼球的新闻标题\n  - 正文：新闻简报，第三人称\n  - 评论：2条读者评论，模拟不同身份的人的发言，可以吐槽、调侃或感慨\n4. 至少一条新闻应与主线剧情事件相关。\n5. 每条新闻占一个区块，区块之间用 === 分隔。\n6. 只输出新闻内容，不加任何说明。\n';
+  } else if (mode === 'calendarAll') {
+    const _aMe = (state.data.characters.me.name || '').trim() || '主控';
+    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 一次性生成晨报6个板块，各板块之间用 ===MODULE=== 分隔，严格按以下顺序和格式输出：\n\n===MEMO===\n（4条备忘录，每条占一行。记录主控"' + _aMe + '"与各NPC的故事事件和待处理意外，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与各NPC的突发消息、意外状况或生活意外，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现与NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条占一行约50-100字。模拟周围人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。描述该NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条花边新闻，每条格式：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容。新闻条目之间用 === 分隔）\n\n2. 一律使用人物姓名指代——主控角色用"' + _aMe + '"，NPC用各自的姓名。\n3. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n4. 只按上述格式输出，不要加任何额外说明或标题。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
-    const _evtOther = (state.data.characters.other.name || '').trim() || 'AI角色';
+    const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
     return '\n【当前模式：时间轴事件生成】\n规则：\n1. 根据主线剧情、近期聊天记录和事件叙事，生成本月的时间轴事件，5-10条日常事件 + 1-3条关键剧情事件，共6-13条。\n2. 事件必须紧扣人设、近期经历和关系状态，不要写空泛的通用内容。\n3. 每条格式严格为：日期|||标题|||内容|||类型\n  - 日期：用"第X年X月X日"格式，年份和月份与用户给出的月份一致\n  - 内容\n  - 类型：日常事件填 normal，关键剧情填 key\n4. 关键剧情（key）应是推动主线发展的转折点。日常事件也应侧面映衬主线氛围，不要与主线脱节。\n5. 一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。\n6. 每条占一行，条目之间不要空行。\n7. 只输出事件列表，不加任何说明。\n';
   }
 
@@ -3757,13 +3751,8 @@ async function callAI(userMessage, mode) {
   ];
 
   try {
-    const maxTokens = mode === 'calendarReport' ? 1500
-      : mode === 'calendarEvents' ? 2000
-      : mode === 'calendarDailyNews' ? 2500
-      : mode === 'calendarMemo' || mode === 'calendarNotification' || mode === 'calendarMenu' || mode === 'calendarSocial' || mode === 'calendarConnection' ? 1500
-      : 2000;
-    // 自动重试：网络/超时类错误重试 1 次，内容审查类不重试
-    return await callWithRetry(() => callOpenAICompatible(messages, config, maxTokens), 1);
+    // 不设定 max_tokens，让 API 使用模型默认最大输出长度，避免内容截断
+    return await callWithRetry(() => callOpenAICompatible(messages, config), 1);
   } catch(e) {
     console.error('AI调用失败', e);
     throw e;
@@ -3794,7 +3783,7 @@ async function callWithRetry(fn, maxRetries) {
 }
 
 // 统一 OpenAI 兼容调用（支持所有 OpenAI 兼容平台：DeepSeek官方/OpenRouter/各类代理等）
-async function callOpenAICompatible(messages, config, maxTokens) {
+async function callOpenAICompatible(messages, config) {
   // 规范化 baseUrl：去除末尾的 / 和 /v1
   let base = (config.baseUrl || '').replace(/\/+$/, '');
   base = base.replace(/\/v1$/, '');
@@ -3811,8 +3800,7 @@ async function callOpenAICompatible(messages, config, maxTokens) {
     messages: messages,
     temperature: config.temperature != null ? config.temperature : 0.85,
     frequency_penalty: config.frequencyPenalty != null ? config.frequencyPenalty : 0.4,
-    presence_penalty: config.presencePenalty != null ? config.presencePenalty : 0.3,
-    max_tokens: maxTokens || 2000
+    presence_penalty: config.presencePenalty != null ? config.presencePenalty : 0.3
   };
   const isGemini = /gemini/i.test(config.model || '') || /generativelanguage\.googleapis\.com/i.test(base);
   if (isGemini) {
@@ -3855,6 +3843,11 @@ async function callOpenAICompatible(messages, config, maxTokens) {
   const choice = data.choices[0];
   const content = (choice.message?.content || '').trim();
 
+  // 截断检测保留作为安全监控：未设 max_tokens 时不应触发 length，
+  // 若仍出现说明 API 端有隐性限制
+  if (choice.finish_reason === 'length') {
+    console.warn('[AI] 响应被截断（finish_reason: length），可能 API 端有隐性长度限制');
+  }
   // 检测内容审查拦截：Google Gemini 通过 OpenAI 兼容端点返回时，
   // HTTP 状态码为 200，但 finish_reason 标记为 safety/content_filter，
   // 或 content 里直接塞入了审查错误的英文说明文本。
@@ -3935,7 +3928,7 @@ function mockResponse(mode, userMessage) {
 /* ========== 聊天页 ========== */
 function buildMessageHtml(msg, idx) {
   const isMe = msg.role === 'user';
-  const charData = isMe ? state.data.characters.me : state.data.characters.other;
+  const charData = isMe ? state.data.characters.me : getActiveNpc();
   // 头像经全局 CSS 变量渲染（applyChatAvatarVars），行内不再复制 base64
   const avatarInner = charData.avatar
     ? ''
@@ -4001,7 +3994,7 @@ function renderChat() {
     return;
   }
   if (history.length === 0) {
-    const npcName = (state.data.characters.other.name || '').trim();
+    const npcName = (getActiveNpc().name || '').trim();
     container.innerHTML = npcName
       ? `<div class="memory-empty">开始与「${escapeHtml(npcName)}」的对话<br><span style="font-size:11px;opacity:0.6">在下方输入消息</span></div>`
       : `<div class="memory-empty">开始你的故事<br><span style="font-size:11px;opacity:0.6">在下方输入消息</span></div>`;
@@ -4108,9 +4101,8 @@ function renderChatList() {
   container.innerHTML = html;
 }
 
-// 返回好友列表（保存当前NPC设定回写）
+// 返回好友列表
 function backToChatList() {
-  syncOtherToActiveNpc();
   state.chatView = 'list';
   renderChat();
   renderNavCharList();
@@ -4306,9 +4298,8 @@ function switchToGroupChat(groupId) {
   if (!grp) return;
   if (state.isLoading) { showToast('正在生成中，请稍后再切换'); return; }
 
-  // 如果当前在NPC对话中，保存当前NPC设定和聊天
+  // 如果当前在NPC对话中，保存当前聊天记录
   if (state.chatView === 'chat' && state.data.activeNpcId) {
-    syncOtherToActiveNpc();
     if (state.data.activeNpcId) state.data.npcChats[state.data.activeNpcId] = state.data.chatHistory;
   }
 
@@ -4666,7 +4657,6 @@ function mockGroupResponse(grp) {
 
 // 返回列表时清除群聊状态
 function backToChatList() {
-  syncOtherToActiveNpc();
   if (state.data.activeGroupId) {
     state.data.activeGroupId = '';
   }
@@ -4716,7 +4706,7 @@ function showTypingIndicator() {
   const container = document.getElementById('chat-messages');
   const emptyEl = container.querySelector('.memory-empty');
   if (emptyEl) emptyEl.remove();
-  const otherChar = state.data.characters.other;
+  const otherChar = getActiveNpc();
   // 头像走全局 CSS 变量，行内不复制 base64
   const typingAvatarInner = otherChar.avatar
     ? ''
@@ -5604,67 +5594,47 @@ async function _generateCalendarContent(targetMonth) {
   const month = targetMonth || state.data.calendarMonth || '';
   const monthPrefix = month ? `当前是${month}。` : '';
 
-  // 收集历史上下文，注入每个模块的触发消息
+  // 收集历史上下文，注入晨报生成
   const monthlyCtx = buildMonthlyContextForCalendar();
 
-  // 1. MEMO
+  // 单次调用生成全部 6 模块
   try {
-    const memoRaw = await callAI(monthPrefix + monthlyCtx + '请生成4条主控的备忘录。', 'calendarMemo');
-    state.data.calendarMemos = memoRaw.trim().split('\n').filter(l => l.trim());
-  } catch(e) { console.error('[晨报] 备忘录生成失败:', e); }
+    const raw = await callAI(monthPrefix + monthlyCtx + '请一次性生成晨报全部6个板块的内容。', 'calendarAll');
+    // 按 ===MARKER=== 分隔符拆分各板块
+    const parts = raw.split(/===(?:MEMO|NOTIFICATION|MENU|SOCIAL|CONNECTION|NEWS)===/);
+    // parts[0] = 第一个标记前的内容（通常为空），后续依次为各板块内容
 
-  // 2. NOTIFICATIONS（注入备忘录摘要）
-  let prevCtx = formatPrevModuleSummary('备忘录', state.data.calendarMemos);
-  try {
-    const notifRaw = await callAI(monthPrefix + monthlyCtx + prevCtx + '请生成3条突发事件通知。', 'calendarNotification');
-    state.data.calendarNotifications = notifRaw.trim().split('\n').filter(l => l.trim());
-  } catch(e) { console.error('[晨报] 突发事件生成失败:', e); }
+    // 1. MEMO
+    state.data.calendarMemos = (parts[1] || '').trim().split('\n').filter(l => l.trim());
 
-  // 3. Daily Menu（注入备忘录+突发事件摘要）
-  prevCtx = formatPrevModuleSummary('备忘录', state.data.calendarMemos)
-          + formatPrevModuleSummary('突发事件', state.data.calendarNotifications);
-  try {
-    const menuRaw = await callAI(monthPrefix + monthlyCtx + prevCtx + '请生成3条餐食记录。', 'calendarMenu');
-    state.data.calendarMenu = menuRaw.trim().split('\n').filter(l => l.trim()).map((line, i) => {
-      const parts = line.split('|||').map(s => s.trim());
-      return { type: parts[0]||'', food: parts[1]||'', source: parts[2]||'', thought: parts[3]||'' };
+    // 2. NOTIFICATION
+    state.data.calendarNotifications = (parts[2] || '').trim().split('\n').filter(l => l.trim());
+
+    // 3. MENU
+    state.data.calendarMenu = (parts[3] || '').trim().split('\n').filter(l => l.trim()).map(line => {
+      const p = line.split('|||').map(s => s.trim());
+      return { type: p[0]||'', food: p[1]||'', source: p[2]||'', thought: p[3]||'' };
     });
-  } catch(e) { console.error('[晨报] 餐食生成失败:', e); }
 
-  // 4. Social Feedback（注入备忘录+突发事件摘要）
-  prevCtx = formatPrevModuleSummary('备忘录', state.data.calendarMemos)
-          + formatPrevModuleSummary('突发事件', state.data.calendarNotifications);
-  try {
-    const socialRaw = await callAI(monthPrefix + monthlyCtx + prevCtx + '请生成3-5条舆论。', 'calendarSocial');
-    state.data.calendarSocial = socialRaw.trim().split('\n').filter(l => l.trim());
-  } catch(e) { console.error('[晨报] 舆论生成失败:', e); }
+    // 4. SOCIAL
+    state.data.calendarSocial = (parts[4] || '').trim().split('\n').filter(l => l.trim());
 
-  // 5. Connections（注入舆论摘要）
-  prevCtx = formatPrevModuleSummary('突发事件', state.data.calendarNotifications)
-          + formatPrevModuleSummary('舆论', state.data.calendarSocial);
-  try {
-    const connRaw = await callAI(monthPrefix + monthlyCtx + prevCtx + '请生成3条NPC与主控的关系进展。', 'calendarConnection');
-    state.data.calendarConnections = connRaw.trim().split('\n').filter(l => l.trim()).map(line => {
-      const parts = line.split('|||').map(s => s.trim());
-      return { pair: parts[0]||'', text: parts[1]||'' };
+    // 5. CONNECTION
+    state.data.calendarConnections = (parts[5] || '').trim().split('\n').filter(l => l.trim()).map(line => {
+      const p = line.split('|||').map(s => s.trim());
+      return { pair: p[0]||'', text: p[1]||'' };
     });
-  } catch(e) { console.error('[晨报] 羁绊进展生成失败:', e); }
 
-  // 6. Daily News（注入全部前序摘要）
-  prevCtx = formatPrevModuleSummary('备忘录', state.data.calendarMemos)
-          + formatPrevModuleSummary('突发事件', state.data.calendarNotifications)
-          + formatPrevModuleSummary('舆论', state.data.calendarSocial)
-          + formatPrevModuleSummary('羁绊进展', state.data.calendarConnections);
-  try {
-    const newsRaw = await callAI(monthPrefix + monthlyCtx + prevCtx + '请生成3条每日新闻简报。', 'calendarDailyNews');
-    const newsBlocks = newsRaw.trim().split(/===/).map(s => s.trim()).filter(s => s);
+    // 6. NEWS（区块内用 === 分隔条目）
+    const newsRaw = (parts[6] || '').trim();
+    const newsBlocks = newsRaw.split(/===/).map(s => s.trim()).filter(s => s);
     state.data.calendarDailyNews = newsBlocks.map(block => {
-      const parts = block.split('|||').map(s => s.trim());
-      const title = parts[0] || '';
-      const body = parts[1] || '';
+      const p = block.split('|||').map(s => s.trim());
+      const title = p[0] || '';
+      const body = p[1] || '';
       const comments = [];
-      for (let i = 2; i < parts.length; i++) {
-        const c = parts[i];
+      for (let i = 2; i < p.length; i++) {
+        const c = p[i];
         const colonIdx = c.indexOf('：');
         if (colonIdx > 0) {
           comments.push({ author: c.substring(0, colonIdx).trim(), text: c.substring(colonIdx + 1).trim() });
@@ -5672,7 +5642,9 @@ async function _generateCalendarContent(targetMonth) {
       }
       return { title, body, comments };
     });
-  } catch(e) { console.error('[晨报] 每日新闻生成失败:', e); }
+  } catch(e) {
+    console.error('[晨报] 内容生成失败:', e);
+  }
 
   if (!state.data.calendarMonth) {
     state.data.calendarMonth = '第1年1月';
@@ -5769,7 +5741,7 @@ async function generateEventPrequel(evt) {
 
   try {
     const _meName = (state.data.characters.me.name || '').trim() || '主控';
-    const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+    const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
     const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${evt.title}\n事件简述：${evt.desc}\n事件日期：${evt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生前的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生前的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
     let narrative = await callAI(prequelPrompt, 'event');
     const parsed = parseNarrativeAndState(narrative);
@@ -6128,7 +6100,7 @@ async function doRefreshNarrative(evtId, side) {
         if (calEvt) {
           const chainEvents = state.data.eventHistory.filter(e => e.calendarEventId === evt.calendarEventId && !e.isSummary && e.id !== evt.id);
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
-          const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+          const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
           let eventContent = '';
           chainEvents.forEach(e => {
             if (e.polishedWish) eventContent += `【愿望】${e.polishedWish}\n`;
@@ -6143,7 +6115,7 @@ async function doRefreshNarrative(evtId, side) {
         const calEvt = state.data.calendarEvents.find(e => e.id === evt.calendarEventId);
         if (calEvt) {
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
-          const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+          const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
           const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n事件日期：${calEvt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生前的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生前的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
           evt.aiNarrative = await callAI(prequelPrompt, 'event');
           const parsed = parseNarrativeAndState(evt.aiNarrative);
@@ -6579,7 +6551,7 @@ async function saveCalendarKeyEvent() {
   try {
     // 收集事件链内容用于总结
     const _meName = (state.data.characters.me.name || '').trim() || '主控';
-    const _otherName = (state.data.characters.other.name || '').trim() || 'AI角色';
+    const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
     let eventContent = '';
     chainEvents.forEach(e => {
       if (e.polishedWish) eventContent += `【愿望】${e.polishedWish}\n`;
@@ -6631,8 +6603,31 @@ async function saveCalendarKeyEvent() {
   }
 }
 
-// 推进到下一月（羁绊页「至下一月」按钮）
-async function advanceToNextMonth() {
+// 推进到下一月（羁绊页「至下一月」按钮）—— 先弹确认框
+function advanceToNextMonth() {
+  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  const currentMonth = state.data.calendarMonth || '第1年1月';
+  const nextMonth = incrementGameMonth(currentMonth);
+  showModal(`
+    <div class="modal">
+      <div class="modal-header">推进至下一月</div>
+      <div class="modal-body" style="padding:20px;text-align:center;">
+        <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+          当前：<strong style="color:var(--gold);">${currentMonth}</strong><br>
+          推进后：<strong style="color:var(--gold);">${nextMonth}</strong><br>
+          当月羁绊与日历内容将归档，AI 将为下月生成新的事件与晨报。<br>
+          是否继续？
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn" onclick="closeModal()">取消</button>
+        <button class="modal-btn primary" onclick="closeModal();doAdvanceToNextMonth()">确认推进</button>
+      </div>
+    </div>
+  `);
+}
+
+async function doAdvanceToNextMonth() {
   if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.isLoading = true;
   state.eventState = 'generating';
@@ -7035,8 +7030,15 @@ function openCharacterEditor(type, npcId) {
     title = '编辑主控人设';
     avatarFallback = '我';
   } else if (type === 'other') {
-    c = state.data.characters.other;
-    title = '编辑角色人设';
+    // 'other' 类型已废弃，重定向到编辑当前激活 NPC
+    const activeNpc = getActiveNpc();
+    if (activeNpc.id) {
+      editorNpcId = activeNpc.id;
+      c = activeNpc;
+      title = '编辑角色人设';
+    } else {
+      return; // 没有激活NPC，无法编辑
+    }
     avatarFallback = 'TA';
   } else if (type === 'npc') {
     if (npcId) {
@@ -7186,14 +7188,15 @@ function saveCharacter(type) {
   };
   if (editorPendingAvatar !== null) fields.avatar = editorPendingAvatar;
 
-  if (type === 'me' || type === 'other') {
-    const c = state.data.characters[type];
+  if (type === 'me') {
+    const c = state.data.characters.me;
     c.name = fields.name || c.name;
     c.gender = fields.gender; c.age = fields.age; c.identity = fields.identity;
     c.oneLiner = fields.oneLiner; c.appearance = fields.appearance;
     c.personality = fields.personality; c.background = fields.background; c.other = fields.other;
     if (fields.avatar !== undefined) c.avatar = fields.avatar;
-  } else if (type === 'npc') {
+  } else if (type === 'npc' || type === 'other') {
+    // 'other' 类型经 openCharacterEditor 已重定向为编辑激活NPC（editorNpcId 已设）
     if (editorNpcId) {
       // 编辑已有NPC
       const npc = state.data.characters.npcs.find(n => n.id === editorNpcId);
@@ -7203,8 +7206,6 @@ function saveCharacter(type) {
         npc.oneLiner = fields.oneLiner; npc.appearance = fields.appearance;
         npc.personality = fields.personality; npc.background = fields.background; npc.other = fields.other;
         if (fields.avatar !== undefined) npc.avatar = fields.avatar;
-        // 若编辑的是当前激活NPC，同步到工作副本
-        if (editorNpcId === state.data.activeNpcId) syncActiveNpcToOther();
       }
     } else {
       // 新增NPC
@@ -7218,7 +7219,6 @@ function saveCharacter(type) {
       // 若当前没有激活NPC，自动激活新建的
       if (!state.data.activeNpcId) {
         state.data.activeNpcId = newId;
-        syncActiveNpcToOther();
         state.data.chatHistory = [];
       }
     }
@@ -7387,8 +7387,9 @@ function showBackupModal() {
       <div class="modal-body" style="padding:20px;">
         <p style="font-size:13px;color:var(--text-dim);margin:0 0 16px;line-height:1.6;">
           游玩进度已全程自动保存到本机。<br>
-          导出：全部全局设定 + 所有剧本（各含对话/设定/事件/历史等完整数据）。<br>
-          导入：覆盖全局设定与同代码剧本，本地独有剧本予以保留。
+          导出：全部全局规则 + 所有剧本（各含对话/设定/事件/历史等完整数据）。<br>
+          导入：覆盖全局规则与同代码剧本，本地独有剧本予以保留。<br>
+          API 配置独立，不参与导出/导入。
         </p>
         <button class="settings-action-btn" onclick="exportData()" style="width:100%;margin-bottom:10px;display:flex;flex-direction:column;gap:2px;align-items:center;">
           <span>导出数据</span>
@@ -7420,12 +7421,14 @@ function exportData() {
       _profileCount: profiles.order.length,
       _activeProfileId: activeId || '',
       _activeProfileName: activeMeta.name || '',
-      // 全局设定 + 全部剧本：每个剧本代码 = profile ID，data[id] 含该剧本的
+      // 全局设定：仅含 globalRules。API 配置(apiConfig)独立于备份，
+      // 不导出也不覆盖，始终保留本机当前配置（含密钥）。
+      // 全部剧本：每个剧本代码 = profile ID，data[id] 含该剧本的
       // 完整数据（对话/设定/事件/历史/记忆/日历等全部信息）
       profiles: {
         order: profiles.order,
         activeId: profiles.activeId,
-        globals: profiles.globals,
+        globals: { globalRules: profiles.globals.globalRules },
         meta: profiles.meta,
         data: profiles.data
       }
@@ -7487,8 +7490,9 @@ function importData(event) {
           <div class="modal-body" style="padding:20px;text-align:center;">
             <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
               备份含 <strong style="color:var(--gold);">${incCount}</strong> 个剧本。<br>
-              导入将<strong style="color:var(--gold);">覆盖全局设定与同代码剧本</strong>，<br>
-              本地独有剧本（代码不同）将予以保留。是否继续？
+              导入将<strong style="color:var(--gold);">覆盖全局规则与同代码剧本</strong>，<br>
+              本地独有剧本（代码不同）将予以保留。<br>
+              API 配置不受影响。是否继续？
             </p>
           </div>
           <div class="modal-footer">
@@ -7517,11 +7521,9 @@ function doImportBackup() {
     const inc = backup.profiles;
     let upserted = 0;
 
-    // 1. 全局设定：整组覆盖（apiConfig 规范化，globalRules 直接覆盖）
-    profiles.globals = {
-      apiConfig: migrateApiConfig(inc.globals && inc.globals.apiConfig),
-      globalRules: Array.isArray(inc.globals && inc.globals.globalRules) ? inc.globals.globalRules : []
-    };
+    // 1. 全局设定：仅覆盖 globalRules。API 配置(apiConfig)独立于备份，
+    // 保留本机当前配置不动，不导入也不覆盖。
+    profiles.globals.globalRules = Array.isArray(inc.globals && inc.globals.globalRules) ? inc.globals.globalRules : profiles.globals.globalRules;
 
     // 2. 剧本：按代码（profile ID）覆盖导入；本地独有剧本（代码不同，不在备份中）原样保留
     Object.keys(inc.data).forEach(id => {
