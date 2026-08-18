@@ -1893,8 +1893,6 @@ input[type="range"].form-input::-moz-range-thumb:hover{background:var(--accent-b
 .api-status.on{background:var(--gold-dim);color:var(--gold)}
 .api-status.off{background:rgba(58,111,165,0.08);color:var(--danger)}
 
-/* Save List（存档系统已移除，样式已并入 Settings Tab 区块） */
-
 /* ========== Toast ========== */
 #toast-container{
   position:fixed;
@@ -2583,7 +2581,14 @@ function loadRegistry() {
         data: data
       };
       if (profiles.order.length && !profiles.activeId) profiles.activeId = profiles.order[0];
-      console.log('[加载] 已加载角色数=%d，activeId=%s', profiles.order.length, profiles.activeId);
+      // 清理旧版(Echo)写入的脏数据：剧本头像由剧本名称首字派生，不用角色头像。
+      // 旧 saveToStorage 曾把 characters.other.avatar 写入 meta.avatar，这里一次性清除。
+      profiles.order.forEach(id => {
+        if (profiles.meta[id] && profiles.meta[id].avatar) {
+          profiles.meta[id].avatar = '';
+        }
+      });
+      console.log('[加载] 已加载剧本数=%d，activeId=%s', profiles.order.length, profiles.activeId);
     }
   } catch(e) { console.error('角色档案加载失败', e); }
   if (!profiles) {
@@ -2616,13 +2621,13 @@ function saveToStorage() {
       const id = profiles.activeId;
       profiles.data[id] = state.data;
       const m = profiles.meta[id] || (profiles.meta[id] = { createdAt: Date.now() });
-      m.name = (state.data.characters && state.data.characters.other.name) || '';
-      m.avatar = (state.data.characters && state.data.characters.other.avatar) || '';
+      // 注意：剧本名称(meta.name)与剧本头像(meta.avatar)由各自的编辑入口单独管理，
+      // 绝不用角色名(characters.other.name/avatar)覆盖，二者是完全独立的字段。
       m.updatedAt = Date.now();
       profiles.globals.apiConfig = state.data.apiConfig;
       profiles.globals.globalRules = Array.isArray(state.data.globalRules) ? state.data.globalRules : [];
       localStorage.setItem(SOUL_KEY, JSON.stringify(profiles));
-      console.log('[保存] 已写入 localStorage，角色数=%d，当前=%s(%s)', profiles.order.length, id, m.name);
+      console.log('[保存] 已写入 localStorage，剧本数=%d，当前=%s', profiles.order.length, id);
       renderNavCharList();
     } else {
       console.log('[保存] profiles.activeId 为空，跳过写入');
@@ -2635,9 +2640,6 @@ function saveToStorage() {
   }
 }
 
-// 别名：保持旧调用兼容
-function persistProfiles() { return saveToStorage(); }
-function flushProfilesNow() { return saveToStorage(); }
 
 function profileDisplayName(id) {
   const m = profiles.meta[id];
@@ -2657,28 +2659,16 @@ function applyProfileGlobals(data) {
   data.globalRules = Array.isArray(profiles.globals.globalRules) ? structuredClone(profiles.globals.globalRules) : [];
 }
 
-// 把某个角色的完整数据装入 state.data（含结构迁移）
+// 把某个剧本的完整数据装入 state.data（含结构归一化）
 function loadProfileIntoState(id) {
-  let parsed = profiles.data[id];
-  if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+  const parsed = profiles.data[id];
   state.data = deepMerge(structuredClone(DEFAULT_DATA), structuredClone(parsed || {}));
   applyGlobalsToState();
-  // 迁移：检测旧格式快照（含"时间节点"或"空间位置"字段），清除后等下次事件重新生成
-  if (state.data.storyState && (state.data.storyState.includes('时间节点') || state.data.storyState.includes('空间位置'))) {
-    state.data.storyState = '';
-    state.data.storyStateStale = true;
-  }
-  // 迁移：旧字段 storyStateConsumed → storyStateStale
-  if ('storyStateConsumed' in state.data) {
-    delete state.data.storyStateConsumed;
-    state.data.storyStateStale = true;
-  }
-  // 多NPC模型归一化：旧「单一 other」结构 → npcs[] + activeNpcId + npcChats
+  // 结构归一化：确保所有必需字段存在
   normalizeNpcModel();
 }
 
-// 多NPC模型归一化：把旧版「单一 other」结构迁移到 npcs[] + activeNpcId + npcChats
-// 同时保证所有必需字段存在。每次装入 state.data 后调用。
+// 结构归一化：保证所有必需字段存在。每次装入 state.data 后调用。
 function normalizeNpcModel() {
   const d = state.data;
   if (!d.characters) d.characters = {};
@@ -2701,49 +2691,6 @@ function normalizeNpcModel() {
   if (!Array.isArray(d.calendarDailyNews)) d.calendarDailyNews = [];
   if (!Array.isArray(d.groupChats)) d.groupChats = [];
   if (typeof d.activeGroupId !== 'string') d.activeGroupId = '';
-
-  // 归档数据迁移：旧版 calendarArchives 含 events（时间轴事件=羁绊内容），需移至 memoryArchives
-  // 旧版 memoryArchives 可能缺少 events 字段，从 calendarArchives 补齐
-  if (d.calendarArchives && d.calendarArchives.length) {
-    d.calendarArchives.forEach(ca => {
-      if (ca.events && ca.events.length) {
-        // 查找对应的 memoryArchives 条目
-        let ma = (d.memoryArchives || []).find(m => m.month === ca.month);
-        if (!ma) {
-          ma = { id: 'ma_migrated_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), month: ca.month, events: [], cards: [] };
-          if (!Array.isArray(d.memoryArchives)) d.memoryArchives = [];
-          d.memoryArchives.push(ma);
-        }
-        // 如果 memoryArchives 条目没有 events，用 calendarArchives 的补齐
-        if (!ma.events || !ma.events.length) {
-          ma.events = JSON.parse(JSON.stringify(ca.events));
-        }
-        // 从 calendarArchives 中删除 events（羁绊内容不属于日历页）
-        delete ca.events;
-      }
-    });
-  }
-
-  // 归档数据补全：旧版 memoryArchives 缺少 eventHistory 字段
-  if (Array.isArray(d.memoryArchives)) {
-    d.memoryArchives.forEach(ma => {
-      if (!ma.eventHistory) ma.eventHistory = [];
-    });
-  }
-
-  // 旧结构迁移：npcs 为空但 other 有名字 → 用 other 种子化第一个 NPC
-  if (d.characters.npcs.length === 0 && d.characters.other.name) {
-    const npcId = 'npc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-    const o = d.characters.other;
-    d.characters.npcs.push({
-      id: npcId,
-      name: o.name, gender: o.gender || '', age: o.age || '', avatar: o.avatar || '',
-      oneLiner: o.oneLiner || '', identity: o.identity || '', appearance: o.appearance || '',
-      personality: o.personality || '', background: o.background || '', other: o.other || ''
-    });
-    d.activeNpcId = npcId;
-    // 旧 chatHistory 即为该 NPC 的聊天记录，保留在 d.chatHistory（激活态）
-  }
 
   // 校正 activeNpcId：指向不存在的 NPC 时回退到第一个
   if (!d.activeNpcId || !d.characters.npcs.some(n => n.id === d.activeNpcId)) {
@@ -2803,15 +2750,20 @@ function switchNpcChat(npcId) {
   updateChatHeaderTitle();
 }
 
-// 旧版单角色数据 → 自动迁移为第一个角色档案
-function migrateLegacyIfNeeded() {
-  return;
-}
-
-// 迁移旧版 apiConfig：{deepseek:{apiKey,model,baseUrl}, gemini:{...}, active:'deepseek'}
-// → 统一格式 {baseUrl, apiKey, model, models:[]}
+// 规范化 apiConfig：Soul 为全新游戏，不再兼容 Echo 旧版多 provider 格式。
+// 仅校验并补全统一格式 {baseUrl, apiKey, model, models, temperature, frequencyPenalty, presencePenalty}。
 function migrateApiConfig(cfg) {
-  return cfg || structuredClone(DEFAULT_DATA.apiConfig);
+  const def = DEFAULT_DATA.apiConfig;
+  if (!cfg || typeof cfg !== 'object') return structuredClone(def);
+  return {
+    baseUrl: cfg.baseUrl || def.baseUrl,
+    apiKey: cfg.apiKey || '',
+    model: cfg.model || def.model,
+    models: Array.isArray(cfg.models) ? cfg.models : [],
+    temperature: (typeof cfg.temperature === 'number') ? cfg.temperature : def.temperature,
+    frequencyPenalty: (typeof cfg.frequencyPenalty === 'number') ? cfg.frequencyPenalty : def.frequencyPenalty,
+    presencePenalty: (typeof cfg.presencePenalty === 'number') ? cfg.presencePenalty : def.presencePenalty
+  };
 }
 
 function deepMerge(base, override) {
@@ -2871,11 +2823,6 @@ function setupAutoSaveHooks() {
 function applyBgImage() {
   const DEFAULT_BG = 'https://cdn.jsdelivr.net/gh/Umi688/Echo@main/images/BackGround.jpg';
   let bg = state.data && state.data.bgImage;
-  // 迁移旧链接 → 新CDN链接
-  if (bg && (bg.includes('umi688.github.io') || bg.includes('BackGroundZdx') || bg.includes('bg1.jpg'))) {
-    bg = DEFAULT_BG;
-    state.data.bgImage = DEFAULT_BG;
-  }
   document.documentElement.style.setProperty('--bg-image', bg ? `url('${bg}')` : `url('${DEFAULT_BG}')`);
   applyChatAvatarVars();
 }
@@ -2893,11 +2840,6 @@ function applyChatAvatarVars() {
   else root.removeProperty('--av-me');
   if (ai) root.setProperty('--av-ai', `url('${ai.replace(/'/g, '%27')}')`);
   else root.removeProperty('--av-ai');
-}
-
-// Emergency cleanup: if storage is full, clear legacy save-slot data to make room
-function emergencyClearStorage() {
-  return false;
 }
 
 // Chat keyboard dismissal: clicking anywhere outside the input box and send button dismisses the keyboard
@@ -3086,9 +3028,11 @@ function registerProfileFromScript(scriptId, opts) {
   profiles.order.unshift(id);
   if (!silent) profiles.activeId = id;
   profiles.data[id] = data;
+  // 剧本名称/头像与角色名/角色头像独立，新建时留空，由编辑入口(openEditProfileName)自定义。
+  // 显示时由 renderNavCharList 兜底为「未命名世界」。
   profiles.meta[id] = {
-    name: (data.characters && data.characters.other.name) || '',
-    avatar: (data.characters && data.characters.other.avatar) || '',
+    name: '',
+    avatar: '',
     scriptId: scriptId,
     createdAt: now,
     updatedAt: now
@@ -3278,14 +3222,12 @@ function switchProfile(id) {
   if (!profiles.data[id]) return;
   if (id === profiles.activeId) { closeNav(); return; }
   if (state.isLoading) { showToast('正在生成中，请稍后再切换'); return; }
-  // 保存当前角色进度
+  // 保存当前剧本进度
   if (state.data && profiles.activeId) saveToStorage();
   profiles.activeId = id;
-  persistProfiles();
   loadProfileIntoState(id);
   resetRuntimeState();
   saveToStorage();
-  flushProfilesNow();  // 切换角色属关键操作，立即落盘
   applyBgImage();
   closeNav();
   enterChatMain();
@@ -3320,8 +3262,7 @@ function saveEditProfileName(id) {
   const newName = input.value.trim();
   if (!newName) { showToast('名称不能为空'); return; }
   profiles.meta[id].name = newName;
-  persistProfiles();
-  flushProfilesNow();
+  saveToStorage();
   closeModal();
   renderNavCharList();
   // 如果编辑的是当前剧本，同步更新聊天页标题
@@ -3371,8 +3312,7 @@ function deleteProfile(id) {
     }
     resetRuntimeState();
   }
-  persistProfiles();
-  flushProfilesNow();  // 删除角色属关键操作，立即落盘
+  saveToStorage();
   applyBgImage();
   closeModal();
   renderNavCharList();
@@ -7447,7 +7387,8 @@ function showBackupModal() {
       <div class="modal-body" style="padding:20px;">
         <p style="font-size:13px;color:var(--text-dim);margin:0 0 16px;line-height:1.6;">
           游玩进度已全程自动保存到本机。<br>
-          可导出全部角色数据为备份文件防止丢失，或从备份文件恢复。
+          导出：全部全局设定 + 所有剧本（各含对话/设定/事件/历史等完整数据）。<br>
+          导入：覆盖全局设定与同代码剧本，本地独有剧本予以保留。
         </p>
         <button class="settings-action-btn" onclick="exportData()" style="width:100%;margin-bottom:10px;display:flex;flex-direction:column;gap:2px;align-items:center;">
           <span>导出数据</span>
@@ -7468,12 +7409,19 @@ function showBackupModal() {
 
 function exportData() {
   try {
+    // 导出前强制落盘一次，保证 profiles 与 state.data 一致
+    saveToStorage();
+    const activeId = profiles.activeId;
+    const activeMeta = (activeId && profiles.meta[activeId]) || {};
     const backup = {
       _type: 'soul_full_backup',
       _version: APP_VERSION,
       _exportTime: Date.now(),
-      currentData: state.data,
-      // 多角色档案：全部角色 + 全局配置（存档系统已移除，进度实时保存在角色档案中）
+      _profileCount: profiles.order.length,
+      _activeProfileId: activeId || '',
+      _activeProfileName: activeMeta.name || '',
+      // 全局设定 + 全部剧本：每个剧本代码 = profile ID，data[id] 含该剧本的
+      // 完整数据（对话/设定/事件/历史/记忆/日历等全部信息）
       profiles: {
         order: profiles.order,
         activeId: profiles.activeId,
@@ -7501,84 +7449,60 @@ function exportData() {
   }
 }
 
-// exportSavesOnly 已随存档系统一并移除
-
 function importData(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = function(e) {
+    let backup;
     try {
-      const backup = JSON.parse(e.target.result);
-      if (!backup._type || !(backup._type.startsWith('soul_') || backup._type.startsWith('echo_'))) {
-        showToast('文件格式不正确，请选择Soul备份文件');
+      backup = JSON.parse(e.target.result);
+    } catch(err) {
+      console.error('导入失败：JSON 解析错误', err);
+      showToast('导入失败：文件解析错误');
+      return;
+    }
+    try {
+      // 格式校验：Soul 为全新游戏，仅接受 soul_full_backup，不再兼容 Echo
+      if (backup._type !== 'soul_full_backup') {
+        showToast('文件格式不正确，请选择 Soul 备份文件');
         return;
       }
-
-      let importMsg = '';
-
-      // 恢复多角色档案（新格式备份）：合并角色，同名ID覆盖
-      // 注：存档系统已移除，旧备份中的 saves 字段不再恢复（进度都在角色档案里）
-      if (backup.profiles && backup.profiles.data) {
-        const inc = backup.profiles;
-        Object.keys(inc.data).forEach(id => {
-          profiles.data[id] = inc.data[id];
-          profiles.meta[id] = (inc.meta && inc.meta[id]) || profiles.meta[id] ||
-            { name: '', avatar: '', createdAt: Date.now(), updatedAt: Date.now() };
-        });
-        (Array.isArray(inc.order) ? inc.order : []).forEach(id => {
-          if (profiles.data[id] && !profiles.order.includes(id)) profiles.order.push(id);
-        });
-        if (inc.globals) {
-          if (inc.globals.apiConfig) profiles.globals.apiConfig = inc.globals.apiConfig;
-          if (Array.isArray(inc.globals.globalRules)) profiles.globals.globalRules = inc.globals.globalRules;
-        }
-        if (!profiles.activeId && profiles.order.length) profiles.activeId = profiles.order[0];
-        persistProfiles();
-        if (profiles.activeId) {
-          loadProfileIntoState(profiles.activeId);
-          resetRuntimeState();
-          saveToStorage();
-          applyBgImage();
-          enterChatMain();
-        } else {
-          renderNavCharList();
-        }
-        importMsg += (importMsg ? '；' : '') + '角色数据已恢复（' + Object.keys(inc.data).length + '个角色）';
-        closeModal();
-        showToast(importMsg);
+      // 结构校验：必须含 profiles.data（剧本字典）
+      if (!backup.profiles || !backup.profiles.data || typeof backup.profiles.data !== 'object' || Array.isArray(backup.profiles.data)) {
+        showToast('备份文件结构损坏，缺少剧本数据');
         return;
       }
+      // 版本感知：备份版本高于当前时记录日志（仅提示，不阻断）
+      const backupVer = backup._version || '未知';
+      if (typeof backupVer === 'string' && !isNaN(parseFloat(backupVer)) && parseFloat(backupVer) > parseFloat(APP_VERSION)) {
+        console.log('[导入] 备份版本 %s 高于当前 %s，部分数据可能不兼容', backupVer, APP_VERSION);
+      }
 
-      // 恢复当前游戏数据（旧格式备份兼容）
-      if (backup.currentData && (backup._type === 'soul_full_backup' || backup._type === 'echo_full_backup') && !backup.profiles) {
-        showModal(`
-          <div class="modal">
-            <div class="modal-header">确认导入当前数据</div>
-            <div class="modal-body" style="padding:20px;text-align:center;">
-              <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
-                检测到备份中包含当前游戏进度数据。<br>
-                导入将<strong style="color:var(--gold);">覆盖当前游戏数据</strong>，是否继续？
-              </p>
-            </div>
-            <div class="modal-footer">
-              <button class="modal-btn" onclick="closeModal()">取消</button>
-              <button class="modal-btn primary" onclick="confirmImportCurrentData()">确认覆盖</button>
-            </div>
+      const incCount = Object.keys(backup.profiles.data).length;
+      // 确认覆盖导入：全局设定与同代码剧本将被覆盖，本地独有剧本（代码不同）保留
+      showModal(`
+        <div class="modal">
+          <div class="modal-header">确认导入</div>
+          <div class="modal-body" style="padding:20px;text-align:center;">
+            <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+              备份含 <strong style="color:var(--gold);">${incCount}</strong> 个剧本。<br>
+              导入将<strong style="color:var(--gold);">覆盖全局设定与同代码剧本</strong>，<br>
+              本地独有剧本（代码不同）将予以保留。是否继续？
+            </p>
           </div>
-        `);
-        // 暂存备份数据供确认后使用
-        window._pendingImportData = backup.currentData;
-        return;
-      }
-
-      if (importMsg) {
-        showToast(importMsg);
-      }
-      closeModal();
+          <div class="modal-footer">
+            <button class="modal-btn" onclick="closeModal()">取消</button>
+            <button class="modal-btn primary" onclick="doImportBackup()">确认导入</button>
+          </div>
+        </div>
+      `);
+      // 暂存整个备份，确认后执行
+      window._pendingBackup = backup;
     } catch(err) {
       console.error('导入失败', err);
-      showToast('导入失败：文件解析错误');
+      showToast('导入失败：' + (err && err.message ? err.message : '未知错误'));
+      closeModal();
     }
   };
   reader.readAsText(file);
@@ -7586,31 +7510,63 @@ function importData(event) {
   event.target.value = '';
 }
 
-function confirmImportCurrentData() {
-  if (!window._pendingImportData) return;
+function doImportBackup() {
+  const backup = window._pendingBackup;
+  if (!backup) return;
   try {
-    const parsed = structuredClone(window._pendingImportData);
-    // 旧格式备份：装入当前角色；若还没有任何角色则创建一个
-    if (!profiles.activeId) {
-      const id = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-      profiles.order.unshift(id);
-      profiles.activeId = id;
+    const inc = backup.profiles;
+    let upserted = 0;
+
+    // 1. 全局设定：整组覆盖（apiConfig 规范化，globalRules 直接覆盖）
+    profiles.globals = {
+      apiConfig: migrateApiConfig(inc.globals && inc.globals.apiConfig),
+      globalRules: Array.isArray(inc.globals && inc.globals.globalRules) ? inc.globals.globalRules : []
+    };
+
+    // 2. 剧本：按代码（profile ID）覆盖导入；本地独有剧本（代码不同，不在备份中）原样保留
+    Object.keys(inc.data).forEach(id => {
+      // 跳过非法条目，避免污染本地档案
+      if (!inc.data[id] || typeof inc.data[id] !== 'object') return;
+      profiles.data[id] = inc.data[id];
+      const incMeta = (inc.meta && inc.meta[id]) || {};
+      // 剧本头像由剧本名称首字派生，清除备份中可能残留的角色头像脏数据
+      profiles.meta[id] = {
+        name: incMeta.name || '',
+        avatar: '',
+        scriptId: incMeta.scriptId || 'custom',
+        createdAt: incMeta.createdAt || Date.now(),
+        updatedAt: incMeta.updatedAt || Date.now()
+      };
+      if (!profiles.order.includes(id)) profiles.order.push(id);
+      upserted++;
+    });
+
+    // 3. 激活剧本：优先用备份的 activeId（已导入），否则保持本地当前，否则取第一个
+    if (inc.activeId && profiles.data[inc.activeId]) {
+      profiles.activeId = inc.activeId;
+    } else if (!profiles.activeId && profiles.order.length) {
+      profiles.activeId = profiles.order[0];
     }
-    if (parsed.apiConfig) profiles.globals.apiConfig = migrateApiConfig(parsed.apiConfig);
-    if (Array.isArray(parsed.globalRules)) profiles.globals.globalRules = parsed.globalRules;
-    state.data = deepMerge(structuredClone(DEFAULT_DATA), parsed);
-    applyGlobalsToState();
-    resetRuntimeState();
-    saveToStorage();
-    applyBgImage();
-    enterChatMain();
-    delete window._pendingImportData;
-    showToast('数据已恢复');
+
+    // 4. 载入激活剧本（含结构迁移/归一化）后一次性落盘
+    // 注意：先 loadProfileIntoState 再 saveToStorage，避免后者用旧 state.data 覆盖刚导入的激活剧本
+    if (profiles.activeId) {
+      loadProfileIntoState(profiles.activeId);
+      resetRuntimeState();
+      saveToStorage();
+      applyBgImage();
+      enterChatMain();
+    } else {
+      renderNavCharList();
+    }
+
+    delete window._pendingBackup;
+    showToast('已导入 ' + upserted + ' 个剧本（本地独有剧本已保留）');
     closeModal();
   } catch(e) {
-    console.error('恢复失败', e);
-    showToast('恢复失败：' + e.message);
-    delete window._pendingImportData;
+    console.error('导入执行失败', e);
+    showToast('导入失败：' + e.message);
+    delete window._pendingBackup;
     closeModal();
   }
 }
@@ -7705,11 +7661,7 @@ function saveGlobalRule(id) {
   renderGlobalRules();
   showToast('已保存');
 }
-/* ========== 存档系统已移除 ==========
- * 按需求删除了手动存档/读档（槽位）功能：游玩全程自动保存，
- * 每条消息/事件/设定变更后立即落盘（IndexedDB，降级 localStorage），
- * 切后台、关闭页面前也会强制保存一次。历史存档数据在启动时自动清理。
- */
+
 /* ========== 启动 ========== */
 init();
 </script>
