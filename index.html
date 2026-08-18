@@ -967,6 +967,13 @@ html:-webkit-full-screen #app{
 .memory-archive-list{
   padding:8px 0;
 }
+.memory-archive-year{
+  font-size:12px;
+  color:var(--text-faint);
+  font-weight:500;
+  padding:12px 16px 4px;
+  letter-spacing:1px;
+}
 .memory-archive-card{
   padding:14px 16px;
   border-bottom:1px solid var(--border);
@@ -4451,14 +4458,13 @@ async function sendGroupChatMessage() {
       saveToStorage();
     }
 
+    // 单次AI调用生成群聊回复，prompt中要求接力互动
     const reply = await callAIGroupChat(text, grp);
     removeTypingIndicator();
 
-    // 解析AI返回的多NPC回复
     const responses = parseGroupAIResponse(reply, grp);
     if (responses.length === 0) {
       showToast('群聊回复解析失败，请重试');
-      // 保留用户消息，移除AI占位
       saveToStorage();
       return;
     }
@@ -4472,8 +4478,7 @@ async function sendGroupChatMessage() {
         speakerName: resp.speakerName
       });
       appendGroupChatMessage(grp.chatHistory.length - 1, grp);
-      // NPC之间回复加短暂延迟感
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 400));
     }
     saveToStorage();
   } catch(e) {
@@ -4486,7 +4491,7 @@ async function sendGroupChatMessage() {
   }
 }
 
-// 群聊AI调用
+// 群聊AI调用（逐个生成：prevReply 为上一轮 NPC 的回复，excludeIds 为已回复的 NPC id）
 async function callAIGroupChat(userMessage, grp) {
   const config = state.data.apiConfig;
   if (!config.apiKey) {
@@ -4521,7 +4526,8 @@ async function callAIGroupChat(userMessage, grp) {
     return n ? n.name : '';
   }).filter(Boolean);
 
-  const groupModePrompt = `\n【当前模式：群聊】\n这是「${grp.name}」的群聊。群成员有：${memberNames.join('、')}。\n主控角色是「${meName}」。\n规则：\n1. 根据主控角色的发言，选择1-2个最合适的群成员进行回复。选择标准：谁的性格和当前话题最相关、谁最可能回应。\n2. 每个回复必须严格符合该角色的性格设定和说话风格。\n3. 回复格式：每条回复占一行，格式为 NPC姓名|||回复内容。每个NPC一条，不要有多余的说明。\n4. 回复要短句、口语化，像真实的微信群聊一样自然。\n5. 绝对禁止任何括号旁白、动作描写、心理描写。只输出对话文字本身。\n6. 不主动推进重大剧情，不展开长篇叙述。\n7. 绝对禁止输出代码、JSON、markdown或任何结构化标记。\n`;
+  // 构建群聊模式指令（单次调用，要求接力互动）
+  const groupModePrompt = `\n【当前模式：群聊】\n这是「${grp.name}」的群聊。群成员有：${memberNames.join('、')}。\n主控角色是「${meName}」。\n规则：\n1. 根据主控角色的发言，选择1-2个最合适的群成员进行回复。选择标准：谁的性格和当前话题最相关、谁最可能回应。\n2. 如果有2个NPC回复，第二个NPC的回复必须考虑第一个NPC的回复内容，自然地接话、回应或互动，形成群员之间的真实互动感，而不是各自独立回复主控。\n3. 每个回复必须严格符合该角色的性格设定和说话风格。\n4. 回复格式：每条回复占一行，格式为 NPC姓名|||回复内容。每个NPC一条，不要有多余的说明。\n5. 回复要短句、口语化，像真实的微信群聊一样自然。\n6. 绝对禁止任何括号旁白、动作描写、心理描写。只输出对话文字本身。\n7. 不主动推进重大剧情，不展开长篇叙述。\n8. 绝对禁止输出代码、JSON、markdown或任何结构化标记。\n`;
 
   // 构建 System Prompt
   let systemPrompt = '';
@@ -4549,7 +4555,7 @@ async function callAIGroupChat(userMessage, grp) {
     { role: 'user', content: userMessage }
   ];
 
-  return await callWithRetry(() => callOpenAICompatible(messages, config, 1500), 1);
+  return await callWithRetry(() => callOpenAICompatible(messages, config), 1);
 }
 
 // 解析群聊AI回复
@@ -5324,16 +5330,27 @@ function renderCalendarArchive(container) {
     return;
   }
   const months = [...archives].reverse(); // 最近的在上
-  let html = '<div class="memory-archive-list">';
+  // 按年份分组
+  const yearGroups = {};
   months.forEach(a => {
-    const preview = a.monthReport
-      ? a.monthReport.substring(0, 40) + (a.monthReport.length > 40 ? '…' : '')
-      : ((a.memos && a.memos.length) ? a.memos.length + '条备忘录' : '点击查看');
-    html += `
+    const yearMatch = a.month.match(/^(第.+?年)/);
+    const year = yearMatch ? yearMatch[1] : '其他';
+    if (!yearGroups[year]) yearGroups[year] = [];
+    yearGroups[year].push(a);
+  });
+  let html = '<div class="memory-archive-list">';
+  Object.keys(yearGroups).forEach(year => {
+    html += `<div class="memory-archive-year">${escapeHtml(year)}</div>`;
+    yearGroups[year].forEach(a => {
+      const preview = a.monthReport
+        ? a.monthReport.substring(0, 40) + (a.monthReport.length > 40 ? '…' : '')
+        : ((a.memos && a.memos.length) ? a.memos.length + '条备忘录' : '点击查看');
+      html += `
       <div class="memory-archive-card" onclick="viewCalendarArchivedMonth('${a.month}')">
         <div class="memory-archive-month">${escapeHtml(a.month)}</div>
         <div class="memory-archive-preview">${escapeHtml(preview)}</div>
       </div>`;
+    });
   });
   html += '</div>';
   container.innerHTML = html;
@@ -5343,14 +5360,11 @@ function renderCalendarArchive(container) {
 function renderCalendarArchivedMonth(container, month) {
   const archive = (state.data.calendarArchives || []).find(a => a.month === month);
   if (!archive) {
-    container.innerHTML = `<div class="memory-archive-header"><button class="memory-archive-back" onclick="exitCalendarArchivedMonth()">返回</button><span>${escapeHtml(month)}</span></div><div class="memory-empty">该月无归档数据</div>`;
+    container.innerHTML = `<div class="memory-empty">该月无归档数据</div>`;
     return;
   }
 
-  let html = `<div class="memory-archive-header">
-    <button class="memory-archive-back" onclick="exitCalendarArchivedMonth()">返回</button>
-    <span>${escapeHtml(month)}</span>
-  </div>`;
+  let html = '';
 
   // 晨报
   if (archive.monthReport) {
@@ -5452,12 +5466,28 @@ function exitCalendarArchivedMonth() {
 
 // 日历页头部按钮切换：归档/查看归档月份时隐藏生成按钮，更新标题
 function updateCalendarHeaderButtons() {
+  const fsBtn = document.getElementById('calendar-fs-btn');
   const genBtn = document.getElementById('calendar-gen-btn');
   const archiveBtn = document.getElementById('calendar-archive-btn');
   const titleEl = document.getElementById('calendar-title');
   const inArchive = state.calendarArchiveMode || !!state.viewingCalendarArchiveMonth;
+
+  // 左上角按钮：查看归档月份时变为返回箭头
+  const ICON_NAV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
+  const ICON_BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
+  if (fsBtn) {
+    if (state.viewingCalendarArchiveMonth) {
+      fsBtn.innerHTML = ICON_BACK;
+      fsBtn.setAttribute('onclick', 'exitCalendarArchivedMonth()');
+      fsBtn.title = '返回';
+    } else {
+      fsBtn.innerHTML = ICON_NAV;
+      fsBtn.setAttribute('onclick', 'openNav()');
+      fsBtn.title = '剧本列表';
+    }
+  }
+
   if (genBtn) genBtn.style.display = inArchive ? 'none' : '';
-  // 归档按钮在查看具体月份时隐藏（用内容区返回按钮退出）
   if (archiveBtn) archiveBtn.style.display = state.viewingCalendarArchiveMonth ? 'none' : '';
   if (titleEl) {
     if (state.viewingCalendarArchiveMonth) titleEl.textContent = state.viewingCalendarArchiveMonth;
@@ -6352,13 +6382,17 @@ function updateMemoryHeaderButtons() {
   const inEvent = !!state.activeCalendarEvent;
   const inArchive = state.memoryArchiveMode || !!state.viewingArchiveMonth;
 
-  // 左上角按钮：事件视图时变为返回箭头，其余恢复菜单图标
+  // 左上角按钮：事件视图或查看归档月份时变为返回箭头，其余恢复菜单图标
   const ICON_NAV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
   const ICON_BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
   if (fsBtn) {
     if (inEvent) {
       fsBtn.innerHTML = ICON_BACK;
       fsBtn.setAttribute('onclick', "exitCalendarKeyEvent()");
+      fsBtn.title = '返回';
+    } else if (state.viewingArchiveMonth) {
+      fsBtn.innerHTML = ICON_BACK;
+      fsBtn.setAttribute('onclick', "exitArchivedMonth()");
       fsBtn.title = '返回';
     } else {
       fsBtn.innerHTML = ICON_NAV;
@@ -6403,7 +6437,7 @@ function exitCalendarKeyEvent() {
   renderMemory();
 }
 
-// 过往羁绊档案视图：按月归档的卡片列表，点击进入当月时间轴+记忆卡片
+// 过往羁绊档案视图：按年分组，每月显示关键剧情标题
 function renderMemoryArchive(container) {
   const currentMonth = state.data.calendarMonth || '';
   const archives = (state.data.memoryArchives || []).filter(a => a.month !== currentMonth);
@@ -6413,18 +6447,36 @@ function renderMemoryArchive(container) {
   }
   const months = [...archives].reverse(); // 最近的在上
 
-  let html = '<div class="memory-archive-list">';
+  // 按年份分组
+  const yearGroups = {};
   months.forEach(a => {
-    const cardCount = (a.cards || []).length;
-    const evtCount = (a.events || []).length;
-    const preview = cardCount > 0
-      ? (a.cards[0].content || '').substring(0, 40) + (a.cards[0].content.length > 40 ? '…' : '')
-      : (evtCount > 0 ? a.events[0].title + '等' + evtCount + '条事件' : '点击查看');
-    html += `
+    const yearMatch = a.month.match(/^(第.+?年)/);
+    const year = yearMatch ? yearMatch[1] : '其他';
+    if (!yearGroups[year]) yearGroups[year] = [];
+    yearGroups[year].push(a);
+  });
+
+  let html = '<div class="memory-archive-list">';
+  Object.keys(yearGroups).forEach(year => {
+    html += `<div class="memory-archive-year">${escapeHtml(year)}</div>`;
+    yearGroups[year].forEach(a => {
+      const events = a.events || [];
+      const keyEvents = events.filter(e => e.isKey);
+      // 辅助文本：显示关键剧情标题
+      let preview;
+      if (keyEvents.length > 0) {
+        preview = keyEvents.map(e => e.title).join('、');
+      } else if (events.length > 0) {
+        preview = events[0].title + '等' + events.length + '条事件';
+      } else {
+        preview = '点击查看';
+      }
+      html += `
       <div class="memory-archive-card" onclick="viewArchivedMonth('${a.month}')">
         <div class="memory-archive-month">${escapeHtml(a.month)}</div>
         <div class="memory-archive-preview">${escapeHtml(preview)}</div>
       </div>`;
+    });
   });
   html += '</div>';
   container.innerHTML = html;
@@ -6447,16 +6499,13 @@ function renderMemoryArchivedTimeline(month) {
   // 仅从羁绊页自己的归档中查找
   const archive = (state.data.memoryArchives || []).find(a => a.month === month);
   if (!archive) {
-    container.innerHTML = `<div class="memory-archive-header"><button class="memory-archive-back" onclick="exitArchivedMonth()">返回</button><span>${escapeHtml(month)}</span></div><div class="memory-empty">该月无归档数据</div>`;
+    container.innerHTML = `<div class="memory-empty">该月无归档数据</div>`;
     return;
   }
   const events = archive.events || [];
   const cards = archive.cards || [];
 
-  let html = `<div class="memory-archive-header">
-    <button class="memory-archive-back" onclick="exitArchivedMonth()">返回</button>
-    <span>${escapeHtml(month)}</span>
-  </div>`;
+  let html = '';
 
   // 显示该月的记忆卡片
   if (cards.length) {
@@ -6614,8 +6663,12 @@ function advanceToNextMonth() {
       <div class="modal-body" style="padding:20px;text-align:center;">
         <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
           当前：<strong style="color:var(--gold);">${currentMonth}</strong><br>
-          推进后：<strong style="color:var(--gold);">${nextMonth}</strong><br>
-          当月羁绊与日历内容将归档，AI 将为下月生成新的事件与晨报。<br>
+          推进后：<strong style="color:var(--gold);">${nextMonth}</strong>
+        </p>
+        <p style="font-size:13px;color:var(--text-dim);margin:12px 0 0;line-height:1.6;">
+          当月羁绊与日历内容将归档<br>AI 将为下月生成新的事件与晨报。
+        </p>
+        <p style="font-size:13px;color:var(--text-main);margin:8px 0 0;font-weight:500;">
           是否继续？
         </p>
       </div>
