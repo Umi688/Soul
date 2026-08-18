@@ -1158,6 +1158,17 @@ html:-webkit-full-screen #app{
   line-height:1.8;
   color:var(--text-dim);
   word-break:break-word;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.cal-social-author{
+  color:rgba(26,43,60,0.6);
+  font-weight:500;
+  font-style:normal;
+  font-size:11.5px;
+}
+.cal-social-text{
   font-style:italic;
 }
 /* CONNECTION items */
@@ -1192,6 +1203,17 @@ html:-webkit-full-screen #app{
   margin-bottom:10px;
 }
 .cal-news-item:last-child{margin-bottom:0}
+.cal-news-type{
+  display:inline-block;
+  font-size:10.5px;
+  color:rgba(26,43,60,0.7);
+  background:rgba(26,43,60,0.08);
+  padding:2px 8px;
+  border-radius:2px;
+  letter-spacing:1px;
+  margin-bottom:8px;
+  font-weight:500;
+}
 .cal-news-title{
   font-size:15px;
   color:rgba(26,43,60,0.98);
@@ -3702,7 +3724,7 @@ function buildModeInstruction(mode) {
     return '\n【当前模式：每日新闻生成】\n规则：\n1. 生成3条新闻简报，风格类似坊间小报的花边新闻。\n2. 新闻应围绕主控角色"' + _dMe + '"和NPC的日常，用夸张、八卦的笔触撰写，但内容基于近期真实经历。\n3. 每条新闻格式严格为：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容\n  - 标题：吸引眼球的新闻标题\n  - 正文：新闻简报，第三人称\n  - 评论：2条读者评论，模拟不同身份的人的发言，可以吐槽、调侃或感慨\n4. 至少一条新闻应与主线剧情事件相关。\n5. 每条新闻占一个区块，区块之间用 === 分隔。\n6. 只输出新闻内容，不加任何说明。\n';
   } else if (mode === 'calendarAll') {
     const _aMe = (state.data.characters.me.name || '').trim() || '主控';
-    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 一次性生成晨报6个板块，各板块之间用 ===MODULE=== 分隔，严格按以下顺序和格式输出：\n\n===MEMO===\n（4条备忘录，每条占一行。记录主控"' + _aMe + '"与各NPC的故事事件和待处理意外，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与各NPC的突发消息、意外状况或生活意外，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现与NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条占一行约50-100字。模拟周围人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。描述该NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条花边新闻，每条格式：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容。新闻条目之间用 === 分隔）\n\n2. 一律使用人物姓名指代——主控角色用"' + _aMe + '"，NPC用各自的姓名。\n3. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n4. 只按上述格式输出，不要加任何额外说明或标题。\n';
+    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。记录主控"' + _aMe + '"与各NPC的故事事件和待处理意外，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与各NPC的突发消息、意外状况或生活意外，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现与NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟周围人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。描述该NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名:评论1内容|||评论2路人名:评论2内容|||评论3路人名:评论3内容。类型从"时事热点""业界要文""八卦密谈"三种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 === 分隔）\n\n2. 一律使用人物姓名指代——主控角色用"' + _aMe + '"，NPC用各自的姓名。\n3. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n4. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -3989,6 +4011,10 @@ function renderChat() {
     renderGroupChatView();
     return;
   }
+
+  // 动态更新输入框 placeholder（单人聊天模式）
+  const npcInput = document.getElementById('chat-input');
+  if (npcInput) npcInput.placeholder = '输入消息（空发送=让TA继续说）...';
 
   applyChatAvatarVars();
   updateChatHeaderTitle();
@@ -4331,6 +4357,10 @@ function renderGroupChatView() {
   const titleEl = document.getElementById('chat-title');
   if (titleEl) titleEl.textContent = grp.name || '群聊';
 
+  // 动态更新输入框 placeholder（群聊模式）
+  const grpInput = document.getElementById('chat-input');
+  if (grpInput) grpInput.placeholder = '输入消息（空发送=看群成员聊天）...';
+
   const container = document.getElementById('chat-messages');
   const history = grp.chatHistory;
 
@@ -4423,13 +4453,63 @@ async function sendGroupChatMessage() {
   const btn = document.getElementById('chat-send-btn');
   if (state.isLoading) return;
   const text = input.value.trim();
-  if (!text) return;
 
   const grp = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
   if (!grp) return;
 
   input.value = '';
   autoResizeInput(input);
+
+  // 空回复：让群成员自己根据上下文聊天互动（不添加用户消息）
+  if (!text) {
+    state.isLoading = true;
+    btn.disabled = true;
+    showGroupTypingIndicator(grp);
+    try {
+      // 快照过期时先提炼
+      if (state.data.storyStateStale) {
+        try {
+          const snapshot = await generateStoryStateSnapshot();
+          if (snapshot) state.data.storyState = snapshot;
+        } catch(e) {
+          console.error('快照提炼失败，使用旧快照', e);
+        }
+        state.data.storyStateStale = false;
+        saveToStorage();
+      }
+
+      // 用特殊提示词触发群成员自主对话
+      const reply = await callAIGroupChat('（系统提示：主控暂时没有发言，群成员们根据近期事件和上下文自发聊天互动。选择1-2个最合适的群成员发言，他们之间要自然接话、互动。）', grp, true);
+      removeTypingIndicator();
+      const responses = parseGroupAIResponse(reply, grp);
+      if (responses.length === 0) {
+        showToast('群成员暂时没有话说');
+        saveToStorage();
+        return;
+      }
+      for (const resp of responses) {
+        grp.chatHistory.push({
+          role: 'assistant',
+          content: resp.content,
+          timestamp: Date.now(),
+          sessionId: state.chatSessionId,
+          speakerId: resp.speakerId,
+          speakerName: resp.speakerName
+        });
+        appendGroupChatMessage(grp.chatHistory.length - 1, grp);
+        await new Promise(r => setTimeout(r, 400));
+      }
+      saveToStorage();
+    } catch(e) {
+      removeTypingIndicator();
+      showToast('群聊回复失败：' + (e.message || '未知错误'));
+    } finally {
+      state.isLoading = false;
+      btn.disabled = false;
+      input.focus();
+    }
+    return;
+  }
 
   // 添加用户消息
   grp.chatHistory.push({
@@ -4492,7 +4572,7 @@ async function sendGroupChatMessage() {
 }
 
 // 群聊AI调用（逐个生成：prevReply 为上一轮 NPC 的回复，excludeIds 为已回复的 NPC id）
-async function callAIGroupChat(userMessage, grp) {
+async function callAIGroupChat(userMessage, grp, isAutoChat) {
   const config = state.data.apiConfig;
   if (!config.apiKey) {
     return mockGroupResponse(grp);
@@ -4527,7 +4607,8 @@ async function callAIGroupChat(userMessage, grp) {
   }).filter(Boolean);
 
   // 构建群聊模式指令（单次调用，要求接力互动）
-  const groupModePrompt = `\n【当前模式：群聊】\n这是「${grp.name}」的群聊。群成员有：${memberNames.join('、')}。\n主控角色是「${meName}」。\n规则：\n1. 根据主控角色的发言，选择1-2个最合适的群成员进行回复。选择标准：谁的性格和当前话题最相关、谁最可能回应。\n2. 如果有2个NPC回复，第二个NPC的回复必须考虑第一个NPC的回复内容，自然地接话、回应或互动，形成群员之间的真实互动感，而不是各自独立回复主控。\n3. 每个回复必须严格符合该角色的性格设定和说话风格。\n4. 回复格式：每条回复占一行，格式为 NPC姓名|||回复内容。每个NPC一条，不要有多余的说明。\n5. 回复要短句、口语化，像真实的微信群聊一样自然。\n6. 绝对禁止任何括号旁白、动作描写、心理描写。只输出对话文字本身。\n7. 不主动推进重大剧情，不展开长篇叙述。\n8. 绝对禁止输出代码、JSON、markdown或任何结构化标记。\n`;
+  const autoChatHint = isAutoChat ? '\n当前状态：主控暂时没有发言，群成员们根据近期事件和上下文自发聊天互动。' : '\n根据主控角色的发言，选择1-2个最合适的群成员进行回复。';
+  const groupModePrompt = `\n【当前模式：群聊】\n这是「${grp.name}」的群聊。群成员有：${memberNames.join('、')}。\n主控角色是「${meName}」。${autoChatHint}\n规则：\n1. 选择1-2个最合适的群成员发言。选择标准：谁的性格和当前话题最相关、谁最可能回应。\n2. 如果有2个NPC回复，第二个NPC的回复必须考虑第一个NPC的回复内容，自然地接话、回应或互动，形成群员之间的真实互动感，而不是各自独立回复。\n3. 每个回复必须严格符合该角色的性格设定和说话风格。\n4. 回复格式：每条回复占一行，格式为 NPC姓名|||回复内容。每个NPC一条，不要有多余的说明。\n5. 回复要短句、口语化，像真实的微信群聊一样自然。\n6. 绝对禁止任何括号旁白、动作描写、心理描写。只输出对话文字本身。\n7. 不主动推进重大剧情，不展开长篇叙述。\n8. 绝对禁止输出代码、JSON、markdown或任何结构化标记。\n`;
 
   // 构建 System Prompt
   let systemPrompt = '';
@@ -4551,9 +4632,12 @@ async function callAIGroupChat(userMessage, grp) {
 
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...recentHistory,
-    { role: 'user', content: userMessage }
+    ...recentHistory
   ];
+  // 非空回复模式才将用户消息添加到末尾
+  if (!isAutoChat) {
+    messages.push({ role: 'user', content: userMessage });
+  }
 
   return await callWithRetry(() => callOpenAICompatible(messages, config), 1);
 }
@@ -5240,7 +5324,14 @@ function buildCalSocialHtml() {
     body = '<div class="memory-empty">暂无舆论</div>';
   } else {
     body = '<div class="cal-section-body">';
-    items.forEach(s => { body += `<div class="cal-social-item">${escapeHtml(s)}</div>`; });
+    items.forEach(s => {
+      if (s.author) {
+        body += `<div class="cal-social-item"><span class="cal-social-author">@${escapeHtml(s.author)}</span><span class="cal-social-text">"${escapeHtml(s.text)}"</span></div>`;
+      } else {
+        // 兼容旧数据（纯字符串）
+        body += `<div class="cal-social-item">${escapeHtml(s.text || s)}</div>`;
+      }
+    });
     body += '</div>';
   }
   return `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">SOCIAL FEEDBACK</span><span class="cal-section-title-cn">舆论</span></div>${body}</div>`;
@@ -5269,15 +5360,16 @@ function buildCalDailyNewsHtml() {
   } else {
     body = '';
     items.forEach(n => {
+      const typeBadge = n.type ? `<span class="cal-news-type">${escapeHtml(n.type)}</span>` : '';
       let commentsHtml = '';
       if (n.comments && n.comments.length) {
         commentsHtml = '<div class="cal-news-divider"></div><div class="cal-news-comments">';
         n.comments.forEach(c => {
-          commentsHtml += `<div class="cal-news-comment"><span class="cal-news-comment-author">${escapeHtml(c.author||'')}</span><span class="cal-news-comment-text">${escapeHtml(c.text||'')}</span></div>`;
+          commentsHtml += `<div class="cal-news-comment"><span class="cal-news-comment-author">@${escapeHtml(c.author||'')}</span><span class="cal-news-comment-text">${escapeHtml(c.text||'')}</span></div>`;
         });
         commentsHtml += '</div>';
       }
-      body += `<div class="cal-news-item"><div class="cal-news-title">${escapeHtml(n.title||'')}</div><div class="cal-news-body">${escapeHtml(n.body||'')}</div>${commentsHtml}</div>`;
+      body += `<div class="cal-news-item">${typeBadge}<div class="cal-news-title">${escapeHtml(n.title||'')}</div><div class="cal-news-body">${escapeHtml(n.body||'')}</div>${commentsHtml}</div>`;
     });
   }
   return `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">DAILY NEWS</span><span class="cal-section-title-cn">每日新闻</span></div>${body}</div>`;
@@ -5401,7 +5493,13 @@ function renderCalendarArchivedMonth(container, month) {
   const social = archive.social || [];
   if (social.length) {
     html += `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">SOCIAL FEEDBACK</span><span class="cal-section-title-cn">舆论</span></div><div class="cal-section-body">`;
-    social.forEach(s => { html += `<div class="cal-social-item">${escapeHtml(s)}</div>`; });
+    social.forEach(s => {
+      if (s.author) {
+        html += `<div class="cal-social-item"><span class="cal-social-author">@${escapeHtml(s.author)}</span><span class="cal-social-text">"${escapeHtml(s.text)}"</span></div>`;
+      } else {
+        html += `<div class="cal-social-item">${escapeHtml(s.text || s)}</div>`;
+      }
+    });
     html += `</div></div>`;
   }
 
@@ -5420,15 +5518,16 @@ function renderCalendarArchivedMonth(container, month) {
   if (news.length) {
     html += `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">DAILY NEWS</span><span class="cal-section-title-cn">每日新闻</span></div>`;
     news.forEach(n => {
+      const typeBadge = n.type ? `<span class="cal-news-type">${escapeHtml(n.type)}</span>` : '';
       let commentsHtml = '';
       if (n.comments && n.comments.length) {
         commentsHtml = '<div class="cal-news-divider"></div><div class="cal-news-comments">';
         n.comments.forEach(c => {
-          commentsHtml += `<div class="cal-news-comment"><span class="cal-news-comment-author">${escapeHtml(c.author||'')}</span><span class="cal-news-comment-text">${escapeHtml(c.text||'')}</span></div>`;
+          commentsHtml += `<div class="cal-news-comment"><span class="cal-news-comment-author">@${escapeHtml(c.author||'')}</span><span class="cal-news-comment-text">${escapeHtml(c.text||'')}</span></div>`;
         });
         commentsHtml += '</div>';
       }
-      html += `<div class="cal-news-item"><div class="cal-news-title">${escapeHtml(n.title||'')}</div><div class="cal-news-body">${escapeHtml(n.body||'')}</div>${commentsHtml}</div>`;
+      html += `<div class="cal-news-item">${typeBadge}<div class="cal-news-title">${escapeHtml(n.title||'')}</div><div class="cal-news-body">${escapeHtml(n.body||'')}</div>${commentsHtml}</div>`;
     });
     html += `</div>`;
   }
@@ -5442,6 +5541,7 @@ function renderCalendarArchivedMonth(container, month) {
 
 // 切换过往日历视图
 function toggleCalendarArchive() {
+  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.calendarArchiveMode = !state.calendarArchiveMode;
   state.viewingCalendarArchiveMonth = null;
   updateCalendarHeaderButtons();
@@ -5630,8 +5730,10 @@ async function _generateCalendarContent(targetMonth) {
   // 单次调用生成全部 6 模块
   try {
     const raw = await callAI(monthPrefix + monthlyCtx + '请一次性生成晨报全部6个板块的内容。', 'calendarAll');
+    // 防御性清理：移除 AI 可能残留的 ===MODULE=== 分隔符
+    const cleaned = raw.replace(/===MODULE===/g, '');
     // 按 ===MARKER=== 分隔符拆分各板块
-    const parts = raw.split(/===(?:MEMO|NOTIFICATION|MENU|SOCIAL|CONNECTION|NEWS)===/);
+    const parts = cleaned.split(/===(?:MEMO|NOTIFICATION|MENU|SOCIAL|CONNECTION|NEWS)===/);
     // parts[0] = 第一个标记前的内容（通常为空），后续依次为各板块内容
 
     // 1. MEMO
@@ -5647,7 +5749,10 @@ async function _generateCalendarContent(targetMonth) {
     });
 
     // 4. SOCIAL
-    state.data.calendarSocial = (parts[4] || '').trim().split('\n').filter(l => l.trim());
+    state.data.calendarSocial = (parts[4] || '').trim().split('\n').filter(l => l.trim()).map(line => {
+      const p = line.split('|||').map(s => s.trim());
+      return { author: p[0] || '', text: p[1] || '' };
+    });
 
     // 5. CONNECTION
     state.data.calendarConnections = (parts[5] || '').trim().split('\n').filter(l => l.trim()).map(line => {
@@ -5660,17 +5765,18 @@ async function _generateCalendarContent(targetMonth) {
     const newsBlocks = newsRaw.split(/===/).map(s => s.trim()).filter(s => s);
     state.data.calendarDailyNews = newsBlocks.map(block => {
       const p = block.split('|||').map(s => s.trim());
-      const title = p[0] || '';
-      const body = p[1] || '';
+      const type = p[0] || '';
+      const title = p[1] || '';
+      const body = p[2] || '';
       const comments = [];
-      for (let i = 2; i < p.length; i++) {
+      for (let i = 3; i < p.length; i++) {
         const c = p[i];
         const colonIdx = c.indexOf('：');
         if (colonIdx > 0) {
           comments.push({ author: c.substring(0, colonIdx).trim(), text: c.substring(colonIdx + 1).trim() });
         }
       }
-      return { title, body, comments };
+      return { type, title, body, comments };
     });
   } catch(e) {
     console.error('[晨报] 内容生成失败:', e);
@@ -6568,6 +6674,7 @@ function exitArchivedMonth() {
 
 // 切换过往羁绊视图
 function toggleMemoryArchive() {
+  if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
   state.memoryArchiveMode = !state.memoryArchiveMode;
   state.viewingArchiveMonth = null;
   updateMemoryHeaderButtons();
