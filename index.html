@@ -319,6 +319,43 @@ html:-webkit-full-screen #app{
   font-weight:300;
   letter-spacing:0.5px;
 }
+.chat-load-more{
+  text-align:center;
+  padding:10px 16px;
+  margin:4px 0 2px;
+  font-size:12px;
+  color:var(--text-dim);
+  cursor:pointer;
+  border-radius:8px;
+  transition:background 0.15s;
+}
+.chat-load-more:active{background:rgba(255,255,255,0.06)}
+.chat-load-sentinel{
+  min-height:0;
+  overflow:visible;
+}
+.chat-load-sentinel:empty{height:0}
+.chat-load-spinner{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:12px 0;
+  font-size:12px;
+  color:var(--text-faint);
+}
+.chat-load-spinner .dots{display:inline-flex;gap:3px}
+.chat-load-spinner .dots span{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--text-faint);
+  animation:chat-dot-bounce 1.2s infinite ease-in-out both;
+}
+.chat-load-spinner .dots span:nth-child(1){animation-delay:-0.32s}
+.chat-load-spinner .dots span:nth-child(2){animation-delay:-0.16s}
+@keyframes chat-dot-bounce{
+  0%,80%,100%{opacity:0.3;transform:scale(0.6)}
+  40%{opacity:1;transform:scale(1)}
+}
 .msg-row{
   display:flex;
   gap:8px;
@@ -518,6 +555,8 @@ html:-webkit-full-screen #app{
   background:transparent;
   color:rgba(58,111,165,0.8);
 }
+/* 晨报事件输入栏：默认隐藏，仅事件视图时显示 */
+#calendar-input-area:not(.input-bar-active){display:none}
 
 /* ========== Chat List View (NPC 好友列表) ========== */
 .chat-list-view,.chat-conversation-view{
@@ -728,6 +767,33 @@ html:-webkit-full-screen #app{
 .calendar-gen-btn svg,
 .calendar-archive-btn svg,
 .calendar-save-btn svg{
+  width:16px;
+  height:16px;
+  display:block;
+}
+/* 跳转按钮：在查看历史月份时显示，晨报↔日历互跳 */
+.calendar-jump-btn{
+  position:absolute;
+  right:14px;
+  top:10px;
+  bottom:8px;
+  margin:auto;
+  width:30px;
+  height:30px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:transparent;
+  border:none;
+  color:var(--text-dim);
+  cursor:pointer;
+  font-family:inherit;
+  padding:0;
+  z-index:2;
+  transition:color 0.3s var(--ease);
+}
+.calendar-jump-btn:hover{color:var(--gold)}
+.calendar-jump-btn svg{
   width:16px;
   height:16px;
   display:block;
@@ -1082,8 +1148,9 @@ html:-webkit-full-screen #app{
   gap:8px;
 }
 .cal-memo-item{
+  position:relative;
   padding:14px 16px;
-  background:linear-gradient(135deg,rgba(239,244,250,0.92) 0%,rgba(221,231,241,0.88) 100%);
+  background:rgba(231,237,245,0.9);
   border:none;
   border-radius:2px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.4);
@@ -1092,10 +1159,18 @@ html:-webkit-full-screen #app{
   color:var(--text-dim);
   word-break:break-word;
 }
+.cal-memo-item.clickable{
+  cursor:pointer;
+  transition:background 0.2s var(--ease);
+}
+.cal-memo-item.clickable:active{
+  background:rgba(212,175,55,0.08);
+}
 /* NOTIFICATION items */
 .cal-notif-item{
+  position:relative;
   padding:14px 16px;
-  background:linear-gradient(135deg,rgba(239,244,250,0.92) 0%,rgba(221,231,241,0.88) 100%);
+  background:rgba(231,237,245,0.9);
   border:none;
   border-radius:2px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.4);
@@ -1103,6 +1178,26 @@ html:-webkit-full-screen #app{
   line-height:1.8;
   color:var(--text-dim);
   word-break:break-word;
+}
+.cal-notif-item.clickable{
+  cursor:pointer;
+  transition:background 0.2s var(--ease);
+}
+.cal-notif-item.clickable:active{
+  background:rgba(212,175,55,0.08);
+}
+/* 关键事件未触发小蓝圆点（微信角标式，卡在右上角边缘） */
+.cal-event-dot{
+  position:absolute;
+  top:-2px;
+  right:-2px;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#3a6fa5;
+  box-shadow:0 0 0 1.5px rgba(255,255,255,0.7);
+  z-index:2;
+  pointer-events:none;
 }
 /* MENU items */
 .cal-menu-item{
@@ -1163,7 +1258,7 @@ html:-webkit-full-screen #app{
   gap:4px;
 }
 .cal-social-author{
-  color:rgba(26,43,60,0.6);
+  color:var(--gold);
   font-weight:500;
   font-style:normal;
   font-size:11.5px;
@@ -2402,7 +2497,7 @@ input[type="range"].form-input::-moz-range-thumb:hover{background:var(--accent-b
   <!-- Calendar Tab (晨报：备忘录 + 通知 + 餐食 + 舆论 + 羁绊 + 新闻) -->
   <div id="tab-calendar" class="tab-content has-bg" style="display:none">
     <div class="bg-overlay"></div>
-    <div class="tab-header"><button class="fs-btn" id="calendar-fs-btn" onclick="openNav()" title="剧本列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button><span class="tab-header-title" id="calendar-title">晨报</span><button class="calendar-gen-btn" id="calendar-gen-btn" onclick="generateCalendarAll()" title="生成晨报"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg></button><button class="calendar-archive-btn" id="calendar-archive-btn" onclick="toggleCalendarArchive()" title="过往晨报"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></button><button class="calendar-save-btn" id="calendar-save-btn" onclick="saveCalendarKeyEvent()" title="保存结束" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button></div>
+    <div class="tab-header"><button class="fs-btn" id="calendar-fs-btn" onclick="openNav()" title="剧本列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button><span class="tab-header-title" id="calendar-title">晨报</span><button class="calendar-jump-btn" id="calendar-jump-btn" onclick="jumpToCorrespondingArchive()" title="跳转日历" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg></button><button class="calendar-gen-btn" id="calendar-gen-btn" onclick="generateCalendarAll()" title="生成晨报"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg></button><button class="calendar-archive-btn" id="calendar-archive-btn" onclick="toggleCalendarArchive()" title="过往晨报"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></button><button class="calendar-save-btn" id="calendar-save-btn" onclick="saveCalendarKeyEvent()" title="保存结束" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button></div>
     <div id="calendar-content"></div>
     <div id="calendar-input-area" class="input-bar"></div>
   </div>
@@ -2410,7 +2505,7 @@ input[type="range"].form-input::-moz-range-thumb:hover{background:var(--accent-b
   <!-- Calendar Page Tab (日历) -->
   <div id="tab-memory" class="tab-content has-bg" style="display:none">
     <div class="bg-overlay"></div>
-    <div class="tab-header"><button class="fs-btn" id="calendar-page-fs-btn" onclick="openNav()" title="剧本列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button><span class="tab-header-title" id="calendar-page-title">日历</span><button class="calendar-page-refresh-btn" id="calendar-page-refresh-btn" onclick="refreshCalendarEvents()" title="刷新时间轴"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg></button><button class="calendar-page-archive-btn" id="calendar-page-archive-btn" onclick="toggleCalendarPageArchive()" title="过往日历"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></button><button class="calendar-page-save-btn" id="calendar-page-save-btn" onclick="saveCalendarKeyEvent()" title="保存结束" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button></div>
+    <div class="tab-header"><button class="fs-btn" id="calendar-page-fs-btn" onclick="openNav()" title="剧本列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg></button><span class="tab-header-title" id="calendar-page-title">日历</span><button class="calendar-jump-btn" id="calendar-page-jump-btn" onclick="jumpToCorrespondingArchive()" title="跳转晨报" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg></button><button class="calendar-page-refresh-btn" id="calendar-page-refresh-btn" onclick="refreshCalendarEvents()" title="刷新时间轴"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg></button><button class="calendar-page-archive-btn" id="calendar-page-archive-btn" onclick="toggleCalendarPageArchive()" title="过往日历"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></button><button class="calendar-page-save-btn" id="calendar-page-save-btn" onclick="saveCalendarKeyEvent()" title="保存结束" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button></div>
     <div id="calendar-page-cards"></div>
     <div class="calendar-page-actions" id="calendar-page-actions">
       <button class="calendar-page-action-btn" id="advance-month-btn" onclick="advanceToNextMonth()">至下一月</button>
@@ -2512,6 +2607,7 @@ const DEFAULT_DATA = {
   calendarDailyNews: [],    // Daily News：3条新闻简报 [{title, body, comments:[{author,text}]}]
   storyState: '',  // 主线剧情状态快照（注入每个NPC的系统指令；由聊天首次发送提炼，关键剧情推进后过期）
   storyStateStale: false,  // 快照是否过期（true=需在下次文字聊天时重新提炼）
+  storyStateBeforeMorningEvents: '',  // 晨报关键事件触发前的快照备份（刷新晨报时回退到此快照）
   mainStory: '',  // 主线剧情约束（用户在设定页手填，注入所有NPC的系统指令）
   apiConfig: {
     baseUrl: 'https://api.deepseek.com',
@@ -2564,8 +2660,16 @@ let state = {
   viewingCalendarTimelineArchiveMonth: null,  // 正在查看的日历归档月份（null=不在查看）
   archiveEventChain: null,   // 归档事件的剧情链（从归档数据读取时临时存储）
   calendarArchiveMode: false, // 日历页是否显示过往日历归档
-  viewingCalendarArchiveMonth: null  // 正在查看的日历归档月份
+  viewingCalendarArchiveMonth: null,  // 正在查看的日历归档月份
+  _preEventScrollTop: 0,  // 进入关键事件前的滚动位置（退出时恢复）
+  _chatRenderedCount: 0,  // 窗口化渲染：当前已从末尾渲染了多少条消息（0=未开始或需重置）
+  _groupRenderedCount: 0,  // 群聊窗口化渲染：同上
+  _chatLoadingMore: false,  // 窗口化渲染：正在加载更多消息（防重复触发）
+  _jumpingToArchive: null  // 跳转标记：在晨报↔日历跳转时临时存储目标月份，switchTab据此跳过归档状态重置
 };
+
+// 窗口化渲染上限：renderChat/renderGroupChatView 每次只渲染最近 N 条，避免长对话全量重建 DOM
+const CHAT_RENDER_WINDOW = 50;
 
 /* ========== 持久化 ========== */
 // Soul 使用单层 localStorage 存储，键名 soul_data
@@ -2716,6 +2820,7 @@ function normalizeNpcModel() {
   if (!Array.isArray(d.calendarDailyNews)) d.calendarDailyNews = [];
   if (!Array.isArray(d.groupChats)) d.groupChats = [];
   if (typeof d.activeGroupId !== 'string') d.activeGroupId = '';
+  if (typeof d.storyStateBeforeMorningEvents !== 'string') d.storyStateBeforeMorningEvents = '';
 
   // 校正 activeNpcId：指向不存在的 NPC 时回退到第一个
   if (!d.activeNpcId || !d.characters.npcs.some(n => n.id === d.activeNpcId)) {
@@ -2800,21 +2905,40 @@ async function init() {
   setupKeyboardHandler();
   setupSwipeNav();
   setupAutoSaveHooks();
+  setupChatInfiniteScroll();
+}
+
+// 窗口化渲染：聊天容器滑到顶部附近时自动触发加载更早消息
+function setupChatInfiniteScroll() {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  container.addEventListener('scroll', () => {
+    if (state._chatLoadingMore) return;
+    const sentinel = container.querySelector('.chat-load-sentinel');
+    if (!sentinel) return;  // 没有哨兵 = 已全部加载
+    // 哨兵进入视口（距顶 60px 内）时触发
+    if (container.scrollTop < 60) {
+      // 判断当前是单人聊天还是群聊
+      if (state.chatView === 'group' && state.data && state.data.activeGroupId) {
+        loadMoreGroupMessages();
+      } else {
+        loadMoreChatMessages();
+      }
+    }
+  }, { passive: true });
 }
 
 /* ========== 游玩自动保存（兜底层） ==========
- * 常规保存：每条消息/事件/记忆/设定变更后已即时调用 saveToStorage()。
- * 这里补三道兜底，覆盖「改了数据但没走到保存点」的边角场景：
- *   1. 定时保存：每 20 秒兜底落盘一次（幂等，数据没变写入也很快）
- *   2. 切后台：visibilitychange → hidden 时立即保存（手机切App/锁屏最常见）
- *   3. 关闭/跳转：pagehide + beforeunload 双保险
+ * 常规保存：每条消息/事件/记忆/设定变更后已即时调用 saveToStorage()（约 60 处调用点）。
+ * 这里补两道兜底，覆盖「改了数据但没走到保存点」的边角场景：
+ *   1. 切后台：visibilitychange → hidden 时立即保存（手机切App/锁屏最常见）
+ *   2. 关闭/跳转：pagehide + beforeunload 双保险
+ * 已移除每 20 秒盲定时器——直接调用已覆盖所有变更点，定时器只会做无谓的 JSON.stringify。
  */
 function setupAutoSaveHooks() {
   const safeSave = () => {
     try { if (state.data) saveToStorage(); } catch(e) {}
   };
-  // 定时兜底
-  setInterval(() => { safeSave(); }, 20000);
   // 切后台立即保存
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { safeSave(); }
@@ -3403,13 +3527,25 @@ function switchTab(tab) {
     renderNavCharList();
     renderChat();
   } else if (tab === 'calendar') {
-    state.calendarArchiveMode = false;
-    state.viewingCalendarArchiveMonth = null;
+    if (state._jumpingToArchive) {
+      // 从日历页跳转过来：直接进入目标月份的晨报归档，不做常规重置
+      state.viewingCalendarArchiveMonth = state._jumpingToArchive;
+      state.calendarArchiveMode = false;
+    } else {
+      state.calendarArchiveMode = false;
+      state.viewingCalendarArchiveMonth = null;
+    }
     updateCalendarHeaderButtons();
     renderCalendar();
   } else if (tab === 'memory') {
-    state.calendarTimelineArchiveMode = false;
-    state.viewingCalendarTimelineArchiveMonth = null;
+    if (state._jumpingToArchive) {
+      // 从晨报页跳转过来：直接进入目标月份的日历归档，不做常规重置
+      state.viewingCalendarTimelineArchiveMonth = state._jumpingToArchive;
+      state.calendarTimelineArchiveMode = false;
+    } else {
+      state.calendarTimelineArchiveMode = false;
+      state.viewingCalendarTimelineArchiveMonth = null;
+    }
     updateCalendarPageHeaderButtons();
     renderCalendarPage();
     renderCalendar();
@@ -3736,7 +3872,8 @@ function buildModeInstruction(mode) {
     const _npcs = (state.data.characters.npcs || []).filter(n => n.name);
     const _npcListStr = _npcs.length ? _npcs.map(n => n.name).join('、') : '（无NPC）';
     // 注：NPC完整人设已由 System Prompt L4 注入，此处仅保留姓名列表用于约束
-    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。围绕主控"' + _aMe + '"与主线剧情的故事事件和待处理意外，可涉及特殊NPC和NPC，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与主线剧情的突发消息、意外状况或生活意外，可涉及特殊NPC和NPC，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（3条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _npcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
+    const _connCount = _npcs.length; // 有几个NPC就生成几条，最多3条
+    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。围绕主控"' + _aMe + '"与主线剧情的故事事件和待处理意外，可涉及特殊NPC和NPC，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与主线剧情的突发消息、意外状况或生活意外，可涉及特殊NPC和NPC，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（' + _connCount + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _npcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -4050,7 +4187,18 @@ function renderChat() {
   let lastSession = -1;
   const currentSessionId = state.chatSessionId;
 
-  history.forEach((msg, idx) => {
+  // 窗口化渲染：只渲染最近 N 条，顶部留一个哨兵元素供滚动监听触发自动加载
+  const total = history.length;
+  const renderCount = Math.min(total, CHAT_RENDER_WINDOW);
+  state._chatRenderedCount = renderCount;
+  const startIdx = total - renderCount;
+
+  if (startIdx > 0) {
+    html += `<div class="chat-load-sentinel" data-remaining="${startIdx}"></div>`;
+  }
+
+  for (let i = startIdx; i < total; i++) {
+    const msg = history[i];
     if (msg.sessionId !== lastSession) {
       const ts = (msg.sessionId === currentSessionId && state.chatSessionStartTime)
         ? state.chatSessionStartTime
@@ -4058,14 +4206,81 @@ function renderChat() {
       html += `<div class="chat-timestamp">${formatTime(ts)}</div>`;
       lastSession = msg.sessionId;
     }
-    html += buildMessageHtml(msg, idx);
-  });
+    html += buildMessageHtml(msg, i);
+  }
 
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 
   // 恢复打字动画（跨页面切换后 DOM 被重建）
   if (state.isTyping && !state.calendarLoading) showTypingIndicator();
+}
+
+// 窗口化渲染：自动加载更早的聊天消息（滑到顶部触发，增量前插，保持滚动位置）
+function loadMoreChatMessages() {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  if (state._chatLoadingMore) return;  // 防重复
+  const history = state.data.chatHistory;
+  const total = history.length;
+  const currentlyRendered = state._chatRenderedCount || CHAT_RENDER_WINDOW;
+  const newCount = Math.min(currentlyRendered + CHAT_RENDER_WINDOW, total);
+  if (newCount === currentlyRendered) return; // 没有更多了
+
+  state._chatLoadingMore = true;
+
+  // 显示加载动画
+  const sentinel = container.querySelector('.chat-load-sentinel');
+  if (sentinel) {
+    sentinel.innerHTML = '<div class="chat-load-spinner"><span>加载中</span><span class="dots"><span></span><span></span><span></span></span></div>';
+  }
+
+  // 用 requestAnimationFrame 延迟一帧，让 spinner 先渲染出来
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      const newStart = total - newCount;
+      const oldStart = total - currentlyRendered;
+      state._chatRenderedCount = newCount;
+
+      // 记住旧滚动位置
+      const oldScrollHeight = container.scrollHeight;
+      const oldScrollTop = container.scrollTop;
+
+      // 构建新加载段的 HTML
+      let prependHtml = '';
+      let lastSession = (oldStart < total) ? history[oldStart].sessionId : -1;
+      const currentSessionId = state.chatSessionId;
+      for (let i = newStart; i < oldStart; i++) {
+        const msg = history[i];
+        if (msg.sessionId !== lastSession) {
+          const ts = (msg.sessionId === currentSessionId && state.chatSessionStartTime)
+            ? state.chatSessionStartTime
+            : msg.timestamp;
+          prependHtml += `<div class="chat-timestamp">${formatTime(ts)}</div>`;
+          lastSession = msg.sessionId;
+        }
+        prependHtml += buildMessageHtml(msg, i);
+      }
+
+      // 更新或移除哨兵
+      if (sentinel) {
+        if (newStart > 0) {
+          sentinel.setAttribute('data-remaining', newStart);
+          sentinel.innerHTML = '';
+          sentinel.insertAdjacentHTML('afterend', prependHtml);
+        } else {
+          sentinel.remove();
+          container.insertAdjacentHTML('afterbegin', prependHtml);
+        }
+      } else {
+        container.insertAdjacentHTML('afterbegin', prependHtml);
+      }
+
+      // 保持视觉位置不变
+      container.scrollTop = oldScrollTop + (container.scrollHeight - oldScrollHeight);
+      state._chatLoadingMore = false;
+    }, 80);  // 80ms 让 spinner 可见
+  });
 }
 
 // 好友列表（NPC + 群聊混排，按最后消息时间倒序）
@@ -4410,7 +4625,18 @@ function renderGroupChatView() {
   let lastSession = -1;
   const currentSessionId = state.chatSessionId;
 
-  history.forEach((msg, idx) => {
+  // 窗口化渲染：只渲染最近 N 条，顶部留哨兵元素供滚动监听触发自动加载
+  const total = history.length;
+  const renderCount = Math.min(total, CHAT_RENDER_WINDOW);
+  state._groupRenderedCount = renderCount;
+  const startIdx = total - renderCount;
+
+  if (startIdx > 0) {
+    html += `<div class="chat-load-sentinel" data-remaining="${startIdx}"></div>`;
+  }
+
+  for (let i = startIdx; i < total; i++) {
+    const msg = history[i];
     if (msg.sessionId !== lastSession) {
       const ts = (msg.sessionId === currentSessionId && state.chatSessionStartTime)
         ? state.chatSessionStartTime
@@ -4418,8 +4644,8 @@ function renderGroupChatView() {
       html += `<div class="chat-timestamp">${formatTime(ts)}</div>`;
       lastSession = msg.sessionId;
     }
-    html += buildGroupMessageHtml(msg, idx, npcs, grp);
-  });
+    html += buildGroupMessageHtml(msg, i, npcs, grp);
+  }
 
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
@@ -4429,6 +4655,70 @@ function renderGroupChatView() {
     const grp2 = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
     if (grp2) showGroupTypingIndicator(grp2);
   }
+}
+
+// 窗口化渲染：自动加载更早的群聊消息（滑到顶部触发，增量前插，保持滚动位置）
+function loadMoreGroupMessages() {
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
+  if (state._chatLoadingMore) return;
+  const grp = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
+  if (!grp) return;
+  const history = grp.chatHistory;
+  const npcs = state.data.characters.npcs || [];
+  const total = history.length;
+  const currentlyRendered = state._groupRenderedCount || CHAT_RENDER_WINDOW;
+  const newCount = Math.min(currentlyRendered + CHAT_RENDER_WINDOW, total);
+  if (newCount === currentlyRendered) return;
+
+  state._chatLoadingMore = true;
+
+  const sentinel = container.querySelector('.chat-load-sentinel');
+  if (sentinel) {
+    sentinel.innerHTML = '<div class="chat-load-spinner"><span>加载中</span><span class="dots"><span></span><span></span><span></span></span></div>';
+  }
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      const newStart = total - newCount;
+      const oldStart = total - currentlyRendered;
+      state._groupRenderedCount = newCount;
+
+      const oldScrollHeight = container.scrollHeight;
+      const oldScrollTop = container.scrollTop;
+
+      let prependHtml = '';
+      let lastSession = (oldStart < total) ? history[oldStart].sessionId : -1;
+      const currentSessionId = state.chatSessionId;
+      for (let i = newStart; i < oldStart; i++) {
+        const msg = history[i];
+        if (msg.sessionId !== lastSession) {
+          const ts = (msg.sessionId === currentSessionId && state.chatSessionStartTime)
+            ? state.chatSessionStartTime
+            : msg.timestamp;
+          prependHtml += `<div class="chat-timestamp">${formatTime(ts)}</div>`;
+          lastSession = msg.sessionId;
+        }
+        prependHtml += buildGroupMessageHtml(msg, i, npcs, grp);
+      }
+
+      if (sentinel) {
+        if (newStart > 0) {
+          sentinel.setAttribute('data-remaining', newStart);
+          sentinel.innerHTML = '';
+          sentinel.insertAdjacentHTML('afterend', prependHtml);
+        } else {
+          sentinel.remove();
+          container.insertAdjacentHTML('afterbegin', prependHtml);
+        }
+      } else {
+        container.insertAdjacentHTML('afterbegin', prependHtml);
+      }
+
+      container.scrollTop = oldScrollTop + (container.scrollHeight - oldScrollHeight);
+      state._chatLoadingMore = false;
+    }, 80);
+  });
 }
 
 // 群聊消息HTML
@@ -4720,6 +5010,7 @@ function appendGroupChatMessage(idx, grp) {
 
   const npcs = state.data.characters.npcs || [];
   container.insertAdjacentHTML('beforeend', buildGroupMessageHtml(msg, idx, npcs, grp));
+  if (state._groupRenderedCount) state._groupRenderedCount++;
   const newMsg = container.querySelector(`.msg-row[data-idx="${idx}"]`);
   if (newMsg) {
     newMsg.classList.add('msg-new');
@@ -4787,6 +5078,7 @@ function appendChatMessage(idx) {
   }
 
   container.insertAdjacentHTML('beforeend', buildMessageHtml(msg, idx));
+  if (state._chatRenderedCount) state._chatRenderedCount++;
   // 给新消息添加滑入动画
   const newMsg = container.querySelector(`.msg-row[data-idx="${idx}"]`);
   if (newMsg) {
@@ -5285,10 +5577,112 @@ function buildCalMemoHtml() {
     body = '<div class="memory-empty">暂无备忘录</div>';
   } else {
     body = '<div class="cal-memo-grid">';
-    memos.forEach(m => { body += `<div class="cal-memo-item">${escapeHtml(m)}</div>`; });
+    memos.forEach((m, i) => {
+      const dot = isMorningEventSaved('memo', i) ? '<span class="cal-event-dot"></span>' : '';
+      body += `<div class="cal-memo-item clickable" onclick="openStoryEventFromMorning('memo',${i})">${dot}${escapeHtml(m)}</div>`;
+    });
     body += '</div>';
   }
   return `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">MEMO</span><span class="cal-section-title-cn">备忘</span></div>${body}</div>`;
+}
+
+// 检查晨报关键事件是否已保存（有 isSummary 记录）
+function isMorningEventSaved(type, index) {
+  const month = state.data.calendarMonth || 'unknown';
+  const evtId = `morning_${type}_${index}_${month}`;
+  return state.data.eventHistory.some(e => e.calendarEventId === evtId && e.isSummary);
+}
+
+// 检查归档月份的晨报关键事件是否已推进（从对应日历归档的 eventHistory 中查找）
+function isArchivedMorningEventSaved(type, index, month) {
+  const evtId = `morning_${type}_${index}_${month}`;
+  const archive = (state.data.calendarTimelineArchives || []).find(a => a.month === month);
+  if (!archive || !archive.eventHistory) return false;
+  return archive.eventHistory.some(e => e.calendarEventId === evtId && e.isSummary);
+}
+
+// 检查归档月份的晨报关键事件是否有事件链（只要有任意记录即可点击查看）
+function hasArchivedMorningEventChain(type, index, month) {
+  const evtId = `morning_${type}_${index}_${month}`;
+  const archive = (state.data.calendarTimelineArchives || []).find(a => a.month === month);
+  if (!archive || !archive.eventHistory) return false;
+  return archive.eventHistory.some(e => e.calendarEventId === evtId);
+}
+
+// 打开归档月份的晨报关键事件（只读查看事件链）
+function openArchivedStoryEventFromMorning(type, index, month) {
+  if (state.isLoading) { showToast('正在生成中，请稍后再操作'); return; }
+
+  const archive = (state.data.calendarArchives || []).find(a => a.month === month);
+  if (!archive) { showToast('未找到该月归档数据'); return; }
+
+  let text = '';
+  if (type === 'memo') {
+    text = (archive.memos || [])[index];
+  } else if (type === 'notif') {
+    text = (archive.notifications || [])[index];
+  }
+  if (!text) { showToast('未找到该事件内容'); return; }
+
+  const preview = text.length > 30 ? text.substring(0, 30) + '…' : text;
+  const typeLabel = type === 'memo' ? '备忘' : '通知';
+
+  // 直接弹出确认框（与日历关键事件一致：先弹窗再查看）
+  showModal(`
+    <div class="modal">
+      <div class="modal-header">查看关键剧情</div>
+      <div class="modal-body" style="padding:20px;text-align:center;">
+        <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+          来源：${typeLabel}<br>
+          内容：<strong style="color:var(--gold);">${escapeHtml(preview)}</strong>
+        </p>
+        <p style="font-size:13px;color:var(--text-main);margin:12px 0 0;font-weight:500;">
+          是否查看？
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn" onclick="closeModal()">取消</button>
+        <button class="modal-btn primary" onclick="closeModal();doOpenArchivedStoryEventFromMorning('${type}',${index},'${escapeHtml(month)}')">确认查看</button>
+      </div>
+    </div>
+  `);
+}
+
+// 执行查看归档月份的晨报关键事件（只读模式）
+function doOpenArchivedStoryEventFromMorning(type, index, month) {
+  if (state.isLoading) { showToast('正在生成中，请稍后再操作'); return; }
+
+  const archive = (state.data.calendarArchives || []).find(a => a.month === month);
+  if (!archive) { showToast('未找到该月归档数据'); return; }
+
+  let text = '';
+  if (type === 'memo') {
+    text = (archive.memos || [])[index];
+  } else if (type === 'notif') {
+    text = (archive.notifications || [])[index];
+  }
+  if (!text) { showToast('未找到该事件内容'); return; }
+
+  const evtId = `morning_${type}_${index}_${month}`;
+
+  // 从日历归档中查找事件链
+  const timelineArchive = (state.data.calendarTimelineArchives || []).find(a => a.month === month);
+  const chainEvents = (timelineArchive && timelineArchive.eventHistory)
+    ? timelineArchive.eventHistory.filter(e => e.calendarEventId === evtId)
+    : [];
+
+  // 即使事件链为空也进入只读视图（与日历关键事件行为一致，空链显示"暂无剧情内容"）
+  state.activeCalendarEvent = evtId;
+  state.currentChainId = 'cal_chain_' + evtId;
+  state.archiveEventChain = chainEvents;
+  state.eventState = 'readonly';
+
+  // 记住进入事件前的滚动位置
+  const _calContainer = document.getElementById('calendar-content');
+  if (_calContainer) state._preEventScrollTop = _calContainer.scrollTop;
+
+  updateCalendarHeaderButtons();
+  renderCalendarContent();
 }
 
 function buildCalNotificationHtml() {
@@ -5298,7 +5692,10 @@ function buildCalNotificationHtml() {
     body = '<div class="memory-empty">暂无通知</div>';
   } else {
     body = '<div class="cal-section-body">';
-    items.forEach(n => { body += `<div class="cal-notif-item">${escapeHtml(n)}</div>`; });
+    items.forEach((n, i) => {
+      const dot = isMorningEventSaved('notif', i) ? '<span class="cal-event-dot"></span>' : '';
+      body += `<div class="cal-notif-item clickable" onclick="openStoryEventFromMorning('notif',${i})">${dot}${escapeHtml(n)}</div>`;
+    });
     body += '</div>';
   }
   return `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">NOTIFICATIONS</span><span class="cal-section-title-cn">通知</span></div>${body}</div>`;
@@ -5341,12 +5738,20 @@ function buildCalSocialHtml() {
 
 function buildCalConnectionHtml() {
   const items = state.data.calendarConnections || [];
+  // 渲染层去重：同一NPC只保留第一条（防止AI未遵守指令时重复）
+  const _seenNpc = new Set();
+  const deduped = items.filter(c => {
+    const name = (c.pair || '').trim();
+    if (!name || _seenNpc.has(name)) return false;
+    _seenNpc.add(name);
+    return true;
+  });
   let body = '';
-  if (!items.length) {
+  if (!deduped.length) {
     body = '<div class="memory-empty">暂无羁绊进展</div>';
   } else {
     body = '<div class="cal-section-body">';
-    items.forEach(c => {
+    deduped.forEach(c => {
       body += `<div class="cal-conn-item"><span class="cal-conn-pair">${escapeHtml(c.pair||'')}</span><span class="cal-conn-text">${escapeHtml(c.text||'')}</span></div>`;
     });
     body += '</div>';
@@ -5391,6 +5796,25 @@ function renderCalendarContent() {
   const container = document.getElementById('calendar-content');
   if (!container) return;
 
+  // 晨报事件推进视图（从备忘/通知点击进入的关键事件）
+  if (state.activeCalendarEvent && state.activeCalendarEvent.startsWith('morning_')) {
+    let html = '';
+    const chainEvents = state.archiveEventChain
+      ? state.archiveEventChain
+      : state.data.eventHistory.filter(e => e.calendarEventId === state.activeCalendarEvent);
+    if (chainEvents.length === 0) {
+      html += '<div class="memory-empty">该事件暂无剧情内容</div>';
+    } else {
+      chainEvents.forEach(evt => {
+        html += buildEventBlockHtml(evt);
+      });
+    }
+    html += `<div id="calendar-state-ui">${buildCalendarStateHtml()}</div>`;
+    container.innerHTML = html;
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+
   // 过往日历归档视图
   if (state.calendarArchiveMode) {
     renderCalendarArchive(container);
@@ -5412,7 +5836,8 @@ function renderCalendarContent() {
   html += buildCalConnectionHtml();
   html += buildCalDailyNewsHtml();
   container.innerHTML = html;
-  container.scrollTop = container.scrollHeight;
+  // 不强制滚到底端：切换Tab和退出事件时保持滚动位置
+  // 仅在初次载入/推进月份时由调用方显式滚动
 }
 
 // 过往日历归档列表（仅日历页自己的内容：晨报+备忘录等）
@@ -5469,7 +5894,13 @@ function renderCalendarArchivedMonth(container, month) {
   const memos = archive.memos || [];
   if (memos.length) {
     html += `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">MEMO</span><span class="cal-section-title-cn">备忘</span></div><div class="cal-memo-grid">`;
-    memos.forEach(m => { html += `<div class="cal-memo-item">${escapeHtml(m)}</div>`; });
+    memos.forEach((m, i) => {
+      const hasChain = hasArchivedMorningEventChain('memo', i, month);
+      const dot = hasChain ? '<span class="cal-event-dot"></span>' : '';
+      const clickAttr = hasChain ? ` onclick="openArchivedStoryEventFromMorning('memo',${i},'${escapeHtml(month)}')"` : '';
+      const clickableClass = hasChain ? ' clickable' : '';
+      html += `<div class="cal-memo-item${clickableClass}"${clickAttr} style="position:relative;">${dot}${escapeHtml(m)}</div>`;
+    });
     html += `</div></div>`;
   }
 
@@ -5477,7 +5908,13 @@ function renderCalendarArchivedMonth(container, month) {
   const notifs = archive.notifications || [];
   if (notifs.length) {
     html += `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">NOTIFICATIONS</span><span class="cal-section-title-cn">通知</span></div><div class="cal-section-body">`;
-    notifs.forEach(n => { html += `<div class="cal-notif-item">${escapeHtml(n)}</div>`; });
+    notifs.forEach((n, i) => {
+      const hasChain = hasArchivedMorningEventChain('notif', i, month);
+      const dot = hasChain ? '<span class="cal-event-dot"></span>' : '';
+      const clickAttr = hasChain ? ` onclick="openArchivedStoryEventFromMorning('notif',${i},'${escapeHtml(month)}')"` : '';
+      const clickableClass = hasChain ? ' clickable' : '';
+      html += `<div class="cal-notif-item${clickableClass}"${clickAttr} style="position:relative;">${dot}${escapeHtml(n)}</div>`;
+    });
     html += `</div></div>`;
   }
 
@@ -5541,6 +5978,37 @@ function renderCalendarArchivedMonth(container, month) {
   container.innerHTML = html;
 }
 
+// 跳转到同月份的对应归档页面（晨报↔日历互跳）
+function jumpToCorrespondingArchive() {
+  // 当前在晨报查看历史月份 → 跳到日历的同一月
+  if (state.viewingCalendarArchiveMonth) {
+    const month = state.viewingCalendarArchiveMonth;
+    const exists = (state.data.calendarTimelineArchives || []).some(a => a.month === month);
+    if (!exists) { showToast('该月无日历归档数据'); return; }
+    // 设置跳转标记，让 switchTab 跳过对目标 tab 归档状态的重置
+    state._jumpingToArchive = month;
+    state.viewingCalendarArchiveMonth = null;
+    state.calendarArchiveMode = false;
+    switchTab('memory');
+    state._jumpingToArchive = null;
+    updateCalendarPageHeaderButtons();
+    return;
+  }
+  // 当前在日历查看历史月份 → 跳到晨报的同一月
+  if (state.viewingCalendarTimelineArchiveMonth) {
+    const month = state.viewingCalendarTimelineArchiveMonth;
+    const exists = (state.data.calendarArchives || []).some(a => a.month === month);
+    if (!exists) { showToast('该月无晨报归档数据'); return; }
+    state._jumpingToArchive = month;
+    state.viewingCalendarTimelineArchiveMonth = null;
+    state.calendarTimelineArchiveMode = false;
+    switchTab('calendar');
+    state._jumpingToArchive = null;
+    updateCalendarHeaderButtons();
+    return;
+  }
+}
+
 // 切换过往日历视图
 function toggleCalendarArchive() {
   if (state.calendarLoading) { showToast('正在生成中，请稍后再试'); return; }
@@ -5571,14 +6039,20 @@ function updateCalendarHeaderButtons() {
   const fsBtn = document.getElementById('calendar-fs-btn');
   const genBtn = document.getElementById('calendar-gen-btn');
   const archiveBtn = document.getElementById('calendar-archive-btn');
+  const saveBtn = document.getElementById('calendar-save-btn');
+  const jumpBtn = document.getElementById('calendar-jump-btn');
   const titleEl = document.getElementById('calendar-title');
+  const inMorningEvent = isMorningEvent();
   const inArchive = state.calendarArchiveMode || !!state.viewingCalendarArchiveMonth;
 
-  // 左上角按钮：查看归档月份时变为返回箭头
   const ICON_NAV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
   const ICON_BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
   if (fsBtn) {
-    if (state.viewingCalendarArchiveMonth) {
+    if (inMorningEvent) {
+      fsBtn.innerHTML = ICON_BACK;
+      fsBtn.setAttribute('onclick', 'exitCalendarKeyEvent()');
+      fsBtn.title = '返回';
+    } else if (state.viewingCalendarArchiveMonth) {
       fsBtn.innerHTML = ICON_BACK;
       fsBtn.setAttribute('onclick', 'exitCalendarArchivedMonth()');
       fsBtn.title = '返回';
@@ -5589,10 +6063,25 @@ function updateCalendarHeaderButtons() {
     }
   }
 
-  if (genBtn) genBtn.style.display = inArchive ? 'none' : '';
-  if (archiveBtn) archiveBtn.style.display = state.viewingCalendarArchiveMonth ? 'none' : '';
+  if (genBtn) genBtn.style.display = (inArchive || inMorningEvent) ? 'none' : '';
+  if (archiveBtn) archiveBtn.style.display = (state.viewingCalendarArchiveMonth || inMorningEvent) ? 'none' : '';
+  // 跳转按钮：仅在看历史月份且不在事件视图时显示
+  if (jumpBtn) jumpBtn.style.display = (state.viewingCalendarArchiveMonth && !inMorningEvent) ? '' : 'none';
+  if (saveBtn) {
+    if (inMorningEvent) {
+      // 晨报事件：检查是否已保存（有 isSummary 记录）
+      const hasSummary = state.data.eventHistory.some(
+        e => e.calendarEventId === state.activeCalendarEvent && e.isSummary
+      );
+      saveBtn.style.display = hasSummary ? 'none' : '';
+      saveBtn.title = '保存结束';
+    } else {
+      saveBtn.style.display = 'none';
+    }
+  }
   if (titleEl) {
-    if (state.viewingCalendarArchiveMonth) titleEl.textContent = state.viewingCalendarArchiveMonth;
+    if (inMorningEvent) titleEl.textContent = '关键剧情';
+    else if (state.viewingCalendarArchiveMonth) titleEl.textContent = state.viewingCalendarArchiveMonth;
     else if (state.calendarArchiveMode) titleEl.textContent = '过往晨报';
     else titleEl.textContent = '晨报';
   }
@@ -5627,10 +6116,53 @@ function updateCalendarStateUI() {
   if (container) container.scrollTop = container.scrollHeight;
 }
 
+// 判断当前是否在晨报事件视图
+function isMorningEvent() {
+  return state.activeCalendarEvent && state.activeCalendarEvent.startsWith('morning_');
+}
+
+// 根据当前事件所在页面渲染（晨报页或日历页）
+function renderActiveEventView() {
+  if (isMorningEvent()) { renderCalendar(); }
+  else { renderCalendarPage(); }
+}
+
+// 根据当前事件所在页面更新头部按钮
+function updateActiveEventHeaderButtons() {
+  if (isMorningEvent()) { updateCalendarHeaderButtons(); }
+  else { updateCalendarPageHeaderButtons(); }
+}
+
+// 根据当前事件所在页面渲染输入栏
+function renderActiveEventInput() {
+  if (isMorningEvent()) { renderCalendarInput(); }
+  else { renderCalendarPageEventInput(); }
+}
+
 function renderCalendarInput() {
   const inputArea = document.getElementById('calendar-input-area');
   if (!inputArea) return;
-  // 事件输入栏在日历页渲染，日历页不显示
+
+  // 晨报事件推进视图：渲染事件输入栏（浮标悬停在晨报内）
+  if (isMorningEvent()) {
+    // 只读模式：已推进的事件不再投递愿望，不显示输入栏
+    if (state.eventState === 'readonly') {
+      inputArea.classList.remove('input-bar-active');
+      inputArea.innerHTML = '';
+      return;
+    }
+    if (state.eventState === 'idle' || state.eventState === 'active' || state.eventState === 'input' || state.eventState === 'ended') {
+      const placeholder = state.eventState === 'active' ? '继续投递剧情愿望...' : '写下你的剧情愿望...';
+      inputArea.classList.add('input-bar-active');
+      inputArea.innerHTML = `
+        <textarea id="event-input" rows="1" placeholder="${placeholder}" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
+        <button onmousedown="event.preventDefault()" onclick="sendCalendarEventWish()">投递</button>
+      `;
+      return;
+    }
+  }
+
+  inputArea.classList.remove('input-bar-active');
   inputArea.innerHTML = '';
 }
 
@@ -5792,6 +6324,11 @@ async function _generateCalendarContent(targetMonth) {
 // 生成全部晨报内容（用户手动点击刷新按钮时调用）
 async function generateCalendarAll(targetMonth) {
   if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  // 事件视图下不刷新
+  if (state.activeCalendarEvent) {
+    showToast('请先退出当前事件视图再刷新');
+    return;
+  }
   const genBtn = document.querySelector('.calendar-gen-btn');
   if (genBtn) genBtn.classList.add('loading');
   state.isLoading = true;
@@ -5801,6 +6338,28 @@ async function generateCalendarAll(targetMonth) {
   if (container) container.innerHTML = `<div class="calendar-loading" style="padding:60px 0;">生成晨报内容中<span class="dots"><span></span><span></span><span></span></span></div>`;
 
   try {
+    // 刷新晨报前：清零当月已触发的晨报关键事件链 + 回退快照
+    const hadMorningChains = state.data.eventHistory.some(
+      e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')
+    );
+    if (hadMorningChains) {
+      // 1. 从 eventHistory 中移除所有晨报事件链记录
+      state.data.eventHistory = state.data.eventHistory.filter(
+        e => !(typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_'))
+      );
+      // 2. 从记忆卡片中移除晨报事件总结
+      state.data.calendarTimelineCards = (state.data.calendarTimelineCards || []).filter(
+        c => !c.isMorningSummary
+      );
+      // 3. 回退快照到晨报事件链触发前的状态
+      if (state.data.storyStateBeforeMorningEvents) {
+        state.data.storyState = state.data.storyStateBeforeMorningEvents;
+      }
+      state.data.storyStateStale = false;
+      state.data.storyStateBeforeMorningEvents = '';
+      saveToStorage();
+    }
+
     // 刷新晨报不生成新快照，仅使用已有快照（快照仅在过月/关键剧情完成时生成）
     await _generateCalendarContent(targetMonth);
   } catch(e) {
@@ -5810,6 +6369,115 @@ async function generateCalendarAll(targetMonth) {
     state.calendarLoading = false;
     if (genBtn) genBtn.classList.remove('loading');
     renderCalendar();
+  }
+}
+
+// 从晨报复忘/通知点击进入剧情（等同于关键事件，但不加入时间轴）
+async function openStoryEventFromMorning(type, index) {
+  if (state.isLoading) { showToast('正在生成中，请稍后再操作'); return; }
+
+  let text = '';
+  if (type === 'memo') {
+    text = (state.data.calendarMemos || [])[index];
+  } else if (type === 'notif') {
+    text = (state.data.calendarNotifications || [])[index];
+  }
+  if (!text) return;
+
+  const month = state.data.calendarMonth || 'unknown';
+  const evtId = `morning_${type}_${index}_${month}`;
+  const preview = text.length > 30 ? text.substring(0, 30) + '…' : text;
+  const typeLabel = type === 'memo' ? '备忘' : '通知';
+
+  showModal(`
+    <div class="modal">
+      <div class="modal-header">进入关键剧情</div>
+      <div class="modal-body" style="padding:20px;text-align:center;">
+        <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+          来源：${typeLabel}<br>
+          内容：<strong style="color:var(--gold);">${escapeHtml(preview)}</strong>
+        </p>
+        <p style="font-size:13px;color:var(--text-dim);margin:12px 0 0;line-height:1.6;">
+          将展开此事件的关键剧情<br>可投递剧情愿望推进叙事
+        </p>
+        <p style="font-size:13px;color:var(--text-main);margin:8px 0 0;font-weight:500;">
+          是否进入？
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn" onclick="closeModal()">取消</button>
+        <button class="modal-btn primary" onclick="closeModal();doOpenStoryEventFromMorning('${type}',${index})">确认进入</button>
+      </div>
+    </div>
+  `);
+}
+
+async function doOpenStoryEventFromMorning(type, index) {
+  if (state.isLoading) { showToast('正在生成中，请稍后再操作'); return; }
+
+  let text = '';
+  if (type === 'memo') {
+    text = (state.data.calendarMemos || [])[index];
+  } else if (type === 'notif') {
+    text = (state.data.calendarNotifications || [])[index];
+  }
+  if (!text) return;
+
+  // 稳定的事件ID：基于类型+索引+月份，同一备忘/通知点击多次只创建一个事件链
+  const month = state.data.calendarMonth || 'unknown';
+  const evtId = `morning_${type}_${index}_${month}`;
+
+  // 构造临时事件对象（不入 calendarEvents，不污染时间轴）
+  const evt = {
+    id: evtId,
+    date: month,
+    title: text.length > 20 ? text.substring(0, 20) + '…' : text,
+    desc: text,
+    isKey: true,
+    advanced: false,
+    fromMorning: type
+  };
+
+  state.activeCalendarEvent = evtId;
+  state.currentChainId = 'cal_chain_' + evtId;
+  state.archiveEventChain = null;
+
+  // 记住进入事件前的滚动位置，退出时恢复
+  const _calContainer = document.getElementById('calendar-content');
+  if (_calContainer) state._preEventScrollTop = _calContainer.scrollTop;
+
+  // 在首次触发晨报事件链前，备份当前快照（刷新晨报时回退到此快照）
+  // 仅当还没有备份时才备份（避免多次触发不同事件链覆盖最早的备份）
+  const hasAnyMorningChain = state.data.eventHistory.some(
+    e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')
+  );
+  if (!hasAnyMorningChain && !state.data.storyStateBeforeMorningEvents) {
+    state.data.storyStateBeforeMorningEvents = state.data.storyState || '';
+    saveToStorage();
+  }
+
+  updateActiveEventHeaderButtons();
+
+  // 检查是否已有前置剧情，没有则生成
+  const existingPrequel = state.data.eventHistory.some(
+    e => e.calendarEventId === evtId && e.isPrequel
+  );
+  // 检查是否已推进完成
+  const existingSummary = state.data.eventHistory.some(
+    e => e.calendarEventId === evtId && e.isSummary
+  );
+  if (existingSummary) {
+    state.eventState = 'readonly';
+    renderActiveEventView();
+    return;
+  }
+  if (!existingPrequel) {
+    state.eventState = 'generating';
+    renderActiveEventView();
+    await generateEventPrequel(evt);
+  } else {
+    state.eventState = 'idle';
+    renderActiveEventView();
   }
 }
 
@@ -5826,11 +6494,74 @@ async function openCalendarKeyEvent(evtId, archiveMonth) {
     if (!archive) return;
     evt = (archive.events || []).find(e => e.id === evtId);
     if (!evt) return;
+    const _preview = evt.desc ? (evt.desc.length > 30 ? evt.desc.substring(0, 30) + '…' : evt.desc) : evt.title;
+    showModal(`
+      <div class="modal">
+        <div class="modal-header">查看关键剧情</div>
+        <div class="modal-body" style="padding:20px;text-align:center;">
+          <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+            日期：<strong style="color:var(--gold);">${escapeHtml(evt.date || archiveMonth)}</strong><br>
+            内容：<strong style="color:var(--gold);">${escapeHtml(_preview)}</strong>
+          </p>
+          <p style="font-size:13px;color:var(--text-main);margin:12px 0 0;font-weight:500;">
+            是否查看？
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn" onclick="closeModal()">取消</button>
+          <button class="modal-btn primary" onclick="closeModal();doOpenCalendarKeyEvent('${evtId}','${archiveMonth}')">确认查看</button>
+        </div>
+      </div>
+    `);
+    return;
+  }
+
+  // 当月事件
+  evt = state.data.calendarEvents.find(e => e.id === evtId);
+  if (!evt) return;
+  const _preview = evt.desc ? (evt.desc.length > 30 ? evt.desc.substring(0, 30) + '…' : evt.desc) : evt.title;
+  showModal(`
+    <div class="modal">
+      <div class="modal-header">进入关键剧情</div>
+      <div class="modal-body" style="padding:20px;text-align:center;">
+        <p style="font-size:13px;color:var(--text-dim);margin:0;line-height:1.6;">
+          日期：<strong style="color:var(--gold);">${escapeHtml(evt.date || '')}</strong><br>
+          内容：<strong style="color:var(--gold);">${escapeHtml(_preview)}</strong>
+        </p>
+        <p style="font-size:13px;color:var(--text-dim);margin:12px 0 0;line-height:1.6;">
+          将展开此事件的关键剧情<br>可投递剧情愿望推进叙事
+        </p>
+        <p style="font-size:13px;color:var(--text-main);margin:8px 0 0;font-weight:500;">
+          是否进入？
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn" onclick="closeModal()">取消</button>
+        <button class="modal-btn primary" onclick="closeModal();doOpenCalendarKeyEvent('${evtId}')">确认进入</button>
+      </div>
+    </div>
+  `);
+}
+
+async function doOpenCalendarKeyEvent(evtId, archiveMonth) {
+  if (state.isLoading) { showToast('正在生成中，请稍后再操作'); return; }
+
+  let evt;
+  let chainEvents = [];
+
+  if (archiveMonth) {
+    // 从归档数据中读取
+    const archive = (state.data.calendarTimelineArchives || []).find(a => a.month === archiveMonth);
+    if (!archive) return;
+    evt = (archive.events || []).find(e => e.id === evtId);
+    if (!evt) return;
     chainEvents = (archive.eventHistory || []).filter(e => e.calendarEventId === evtId);
     state.activeCalendarEvent = evtId;
     state.currentChainId = 'cal_chain_' + evtId;
     state.archiveEventChain = chainEvents;
     state.eventState = 'readonly';
+    const _pageContainer1 = document.getElementById('calendar-page-cards');
+    if (_pageContainer1) state._preEventScrollTop = _pageContainer1.scrollTop;
     updateCalendarPageHeaderButtons();
     renderCalendarPage();
     return;
@@ -5842,6 +6573,9 @@ async function openCalendarKeyEvent(evtId, archiveMonth) {
   state.activeCalendarEvent = evtId;
   state.currentChainId = 'cal_chain_' + evtId;
   state.archiveEventChain = null;
+  // 记住进入事件前的滚动位置
+  const _pageContainer2 = document.getElementById('calendar-page-cards');
+  if (_pageContainer2) state._preEventScrollTop = _pageContainer2.scrollTop;
   updateCalendarPageHeaderButtons();
 
   // 已推进的关键事件：允许查看，但不允许投递愿望
@@ -5895,13 +6629,13 @@ async function generateEventPrequel(evt) {
     state.eventState = 'idle';
     state.isLoading = false;
     state.calendarLoading = false;
-    renderCalendarPage();
+    renderActiveEventView();
   } catch (err) {
     console.error('前置剧情生成失败:', err);
     state.eventState = 'idle';
     state.isLoading = false;
     state.calendarLoading = false;
-    renderCalendarPage();
+    renderActiveEventView();
     showToast('前置剧情生成失败，请重试');
   }
 }
@@ -5948,12 +6682,12 @@ async function sendCalendarEventWish() {
     state.eventState = 'active';
     appendCalendarEvent(evtId);
     updateCalendarStateUI();
-    renderCalendarPageEventInput();
+    renderActiveEventInput();
   } catch(e) {
     showToast('生成失败：' + (e.message || '未知错误'));
     state.eventState = 'input';
     updateCalendarStateUI();
-    renderCalendarPageEventInput();
+    renderActiveEventInput();
   } finally {
     state.isLoading = false;
     state.calendarLoading = false;
@@ -6022,6 +6756,33 @@ function buildSnapshotContext() {
   const currentKeyEvents = (state.data.calendarEvents || []).filter(e => e.isKey);
   const currentNormalEvents = (state.data.calendarEvents || []).filter(e => !e.isKey);
   const currentChains = (state.data.eventHistory || []).filter(e => !e.isSummary && !e.isPrequel);
+
+  // 晨报关键事件：不在 calendarEvents 中，但从 eventHistory 中提取已保存的事件链
+  const morningChainIds = [...new Set(
+    state.data.eventHistory
+      .filter(e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_'))
+      .map(e => e.calendarEventId)
+  )];
+  morningChainIds.forEach(evtId => {
+    const summaryEvt = state.data.eventHistory.find(e => e.calendarEventId === evtId && e.isSummary);
+    // 从事件ID解析标题（morning_type_index_month 格式）
+    const parts = evtId.match(/^morning_(\w+)_(\d+)_(.+)$/);
+    let morningTitle = evtId;
+    let morningDesc = evtId;
+    if (parts) {
+      const type = parts[1];
+      const idx = parseInt(parts[2]);
+      let text = '';
+      if (type === 'memo') text = (state.data.calendarMemos || [])[idx] || '';
+      else if (type === 'notif') text = (state.data.calendarNotifications || [])[idx] || '';
+      if (text) {
+        morningTitle = text.length > 20 ? text.substring(0, 20) + '…' : text;
+        morningDesc = text;
+      }
+    }
+    timelineContext += `晨报关键事件：${morningTitle} - ${morningDesc}\n`;
+    if (summaryEvt && summaryEvt.aiNarrative) timelineContext += `事件总结：${summaryEvt.aiNarrative}\n`;
+  });
   currentKeyEvents.forEach(e => {
     timelineContext += `关键事件：${e.title} - ${e.desc}\n`;
     if (e.summary) timelineContext += `事件总结：${e.summary}\n`;
@@ -6443,8 +7204,8 @@ function renderCalendarPage() {
   const container = document.getElementById('calendar-page-cards');
   if (!container) return;
 
-  // 事件推进视图：渲染前置剧情 + 叙事卡片
-  if (state.activeCalendarEvent) {
+  // 事件推进视图：渲染前置剧情 + 叙事卡片（晨报事件仅在晨报页渲染，不在日历页显示）
+  if (state.activeCalendarEvent && !isMorningEvent()) {
     let html = '';
     // 优先从归档事件链读取，否则从当月 eventHistory 读取
     const chainEvents = state.archiveEventChain
@@ -6574,8 +7335,9 @@ function updateCalendarPageHeaderButtons() {
   const refreshBtn = document.getElementById('calendar-page-refresh-btn');
   const archiveBtn = document.getElementById('calendar-page-archive-btn');
   const saveBtn = document.getElementById('calendar-page-save-btn');
+  const jumpBtn = document.getElementById('calendar-page-jump-btn');
   const titleEl = document.getElementById('calendar-page-title');
-  const inEvent = !!state.activeCalendarEvent;
+  const inEvent = !!state.activeCalendarEvent && !isMorningEvent();
   const inArchive = state.calendarTimelineArchiveMode || !!state.viewingCalendarTimelineArchiveMonth;
 
   // 左上角按钮：事件视图或查看归档月份时变为返回箭头，其余恢复菜单图标
@@ -6598,7 +7360,9 @@ function updateCalendarPageHeaderButtons() {
   }
 
   if (refreshBtn) refreshBtn.style.display = (inEvent || inArchive) ? 'none' : '';
-  if (archiveBtn) archiveBtn.style.display = inEvent ? 'none' : '';
+  if (archiveBtn) archiveBtn.style.display = (inEvent || inArchive) ? 'none' : '';
+  // 跳转按钮：仅在看历史月份且不在事件视图时显示
+  if (jumpBtn) jumpBtn.style.display = (state.viewingCalendarTimelineArchiveMonth && !inEvent) ? '' : 'none';
   if (saveBtn) {
     // 保存按钮：仅在当月事件视图且事件未推进时显示
     if (inEvent && !state.archiveEventChain) {
@@ -6625,12 +7389,24 @@ function updateCalendarPageHeaderButtons() {
 // 退出关键事件视图（不生成总结，可再次进入）
 function exitCalendarKeyEvent() {
   if (state.isLoading) { showToast('正在生成中，请稍后再试'); return; }
+  const wasMorning = isMorningEvent();
+
   state.activeCalendarEvent = null;
   state.currentChainId = null;
   state.archiveEventChain = null;
   state.eventState = 'idle';
-  updateCalendarPageHeaderButtons();
-  renderCalendarPage();
+  if (wasMorning) {
+    updateCalendarHeaderButtons();
+    renderCalendar();
+    // 恢复进入事件前的滚动位置
+    const calContainer = document.getElementById('calendar-content');
+    if (calContainer) calContainer.scrollTop = state._preEventScrollTop || 0;
+  } else {
+    updateCalendarPageHeaderButtons();
+    renderCalendarPage();
+    const pageContainer = document.getElementById('calendar-page-cards');
+    if (pageContainer) pageContainer.scrollTop = state._preEventScrollTop || 0;
+  }
 }
 
 // 过往日历档案视图：按年分组，每月显示关键剧情标题
@@ -6776,11 +7552,41 @@ async function saveCalendarKeyEvent() {
   if (state.isLoading) { showToast('正在生成中，请稍后再保存'); return; }
   if (!state.activeCalendarEvent) return;
 
-  const calEvt = state.data.calendarEvents.find(e => e.id === state.activeCalendarEvent);
+  // 查找事件对象：先从 calendarEvents 查找，晨报事件不在其中则构造临时对象
+  let calEvt = state.data.calendarEvents.find(e => e.id === state.activeCalendarEvent);
+  const isMorning = isMorningEvent();
+  if (!calEvt && isMorning) {
+    // 晨报事件：从 eventHistory 中查找事件信息构造临时对象
+    const firstEvt = state.data.eventHistory.find(e => e.calendarEventId === state.activeCalendarEvent);
+    // 从事件ID解析原始文本（morning_type_index_month 格式）
+    const parts = state.activeCalendarEvent.match(/^morning_(\w+)_(\d+)_(.+)$/);
+    let title = state.activeCalendarEvent;
+    let desc = state.activeCalendarEvent;
+    if (parts) {
+      const type = parts[1];
+      const idx = parseInt(parts[2]);
+      const month = parts[3];
+      let text = '';
+      if (type === 'memo') text = (state.data.calendarMemos || [])[idx] || '';
+      else if (type === 'notif') text = (state.data.calendarNotifications || [])[idx] || '';
+      if (text) {
+        title = text.length > 20 ? text.substring(0, 20) + '…' : text;
+        desc = text;
+      }
+    }
+    calEvt = { id: state.activeCalendarEvent, title, desc, date: parts ? parts[3] : '', isKey: true, advanced: false };
+  }
   if (!calEvt) return;
 
-  // 已推进的事件：忽略保存操作
-  if (calEvt.advanced) return;
+  // 已推进的事件：忽略保存操作（晨报事件通过 isSummary 判断）
+  if (isMorning) {
+    const hasSummary = state.data.eventHistory.some(
+      e => e.calendarEventId === state.activeCalendarEvent && e.isSummary
+    );
+    if (hasSummary) return;
+  } else {
+    if (calEvt.advanced) return;
+  }
 
   // 检查是否有实际内容（前置剧情或玩家投递）
   const chainEvents = state.data.eventHistory.filter(e => e.calendarEventId === state.activeCalendarEvent);
@@ -6792,8 +7598,8 @@ async function saveCalendarKeyEvent() {
   state.isLoading = true;
   state.calendarLoading = true;
   state.eventState = 'generating';
-  updateCalendarPageHeaderButtons();
-  renderCalendarPage();
+  updateActiveEventHeaderButtons();
+  renderActiveEventView();
 
   try {
     // 合并调用：1次API同时生成事件总结 + 状态快照C
@@ -6811,9 +7617,11 @@ async function saveCalendarKeyEvent() {
       timestamp: Date.now()
     });
 
-    // 标记关键事件已推进，并存储总结到事件本身
-    calEvt.advanced = true;
-    calEvt.summary = summary;
+    // 标记关键事件已推进，并存储总结到事件本身（晨报事件不在 calendarEvents 中，跳过）
+    if (!isMorning) {
+      calEvt.advanced = true;
+      calEvt.summary = summary;
+    }
     // 标记新会话边界（聊天时仅开新会话，不生成快照）
     state.data.storyStateStale = true;
     // 应用合并调用返回的快照C
@@ -6823,7 +7631,8 @@ async function saveCalendarKeyEvent() {
     state.data.calendarTimelineCards.push({
       id: 'mc_' + Date.now(),
       content: summary,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      isMorningSummary: isMorning || false
     });
 
     saveToStorage();
@@ -6832,15 +7641,15 @@ async function saveCalendarKeyEvent() {
     state.eventState = 'readonly';
 
     // 渲染带总结的事件视图，保存按钮隐藏，用返回按钮退出
-    updateCalendarPageHeaderButtons();
-    renderCalendarPage();
+    updateActiveEventHeaderButtons();
+    renderActiveEventView();
     showToast('已保存事件总结');
   } catch (err) {
     console.error('事件总结生成失败:', err);
     state.isLoading = false;
     state.calendarLoading = false;
     state.eventState = 'idle';
-    renderCalendarPage();
+    renderActiveEventView();
     showToast('总结生成失败，请重试');
   }
 }
@@ -6896,11 +7705,16 @@ async function doAdvanceToNextMonth() {
     const currentMonth = state.data.calendarMonth || '第1年1月';
     const currentCards = state.data.calendarTimelineCards || [];
 
-    // 日历页归档：时间轴事件 + 记忆卡片 + 事件链历史
-    if (state.data.calendarEvents.length > 0 || currentCards.length > 0) {
+    // 日历页归档：时间轴事件 + 记忆卡片 + 事件链历史（含晨报关键事件链）
+    const morningEventIds = state.data.eventHistory
+      .filter(e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_'))
+      .map(e => e.calendarEventId);
+    const allEventIds = [...state.data.calendarEvents.map(e => e.id), ...new Set(morningEventIds)];
+    const hasMorningContent = morningEventIds.length > 0;
+    if (state.data.calendarEvents.length > 0 || currentCards.length > 0 || hasMorningContent) {
       const currentEventIds = state.data.calendarEvents.map(e => e.id);
       const archivedEventHistory = state.data.eventHistory.filter(
-        e => currentEventIds.includes(e.calendarEventId)
+        e => currentEventIds.includes(e.calendarEventId) || (typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_'))
       );
       state.data.calendarTimelineArchives.push({
         id: 'ma_' + Date.now(),
@@ -6974,6 +7788,7 @@ async function doAdvanceToNextMonth() {
     state.data.calendarMonthReport = '';
     state.data.calendarTimelineCards = [];
     state.data.eventHistory = [];
+    state.data.storyStateBeforeMorningEvents = '';
 
     // 6. 生成新快照B（包含新月份的晨报+事件内容）
     try {
@@ -7057,6 +7872,7 @@ async function refreshCalendarEvents() {
     state.data.calendarEvents = events;
     state.data.calendarTimelineCards = [];
     state.data.eventHistory = [];
+    state.data.storyStateBeforeMorningEvents = '';
     saveToStorage();
     showToast('时间轴事件已刷新');
   } catch(e) {
