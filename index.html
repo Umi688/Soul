@@ -1800,6 +1800,7 @@ html:-webkit-full-screen #app{
 }
 @keyframes modalIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
 .modal-header{
+  position:relative;
   padding:20px 20px 10px;
   font-size:15px;
   font-weight:300;
@@ -1882,6 +1883,30 @@ html:-webkit-full-screen #app{
   color:var(--gold);
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),0 3px 12px rgba(26,43,60,0.14);
 }
+/* NPC编辑弹窗右上角的星标开关：星标NPC进入晨报羁绊板块的选择池 */
+.npc-star-btn{
+  position:absolute;
+  right:12px;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:none;
+  border-radius:2px;
+  cursor:pointer;
+  background:transparent;
+  color:var(--text-faint);
+  transition:all 0.3s var(--ease);
+}
+.npc-star-btn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.npc-star-btn:hover{color:var(--text-dim);}
+.npc-star-btn:active{transform:translateY(-50%) scale(0.92);}
+.npc-star-btn.on{color:var(--gold);}
+.npc-star-btn.on svg{fill:currentColor;}
 /* 拉取模型按钮：与输入框 1:3 分布 → 宽度为原 flex:1 布局的一半 */
 .fetch-models-btn{
   flex:1;
@@ -3821,8 +3846,9 @@ function buildModeInstruction(mode) {
     return '\n【当前模式：舆论生成】\n规则：\n1. 生成3-5条舆论，围绕主控角色"' + _sMe + '"与各NPC的近况和社交评价。\n2. 舆论应模拟周围人、邻居、同事或社交圈的闲言碎语和看法。\n3. 每条舆论为一段话，约50-100字，带有主观色彩和八卦口吻。\n4. 至少一条舆论应涉及主线相关事件引发的社交反响。\n5. 紧扣人设和近期经历。\n6. 一律使用人物姓名指代，NPC用各自的姓名。\n7. 每条占一行，条目之间不要空行。\n8. 只输出舆论文本，不加编号、标题或说明。\n';
   } else if (mode === 'calendarConnection') {
     const _cMe = (state.data.characters.me.name || '').trim() || '主控';
-    const _cNpcs = (state.data.characters.npcs || []).filter(n => n.name);
-    // 羁绊最多3个：特殊NPC < 3时全部显示，≥3时随机挑选3个
+    // 羁绊池：仅星标NPC（星标仅作用于羁绊模块，其余逻辑不变）
+    const _cNpcs = (state.data.characters.npcs || []).filter(n => n.name && n.starred);
+    // 羁绊最多3个：星标NPC < 3时全部显示，≥3时随机挑选3个
     let _selectedNpcs = _cNpcs;
     if (_cNpcs.length > 3) {
       const _shuffled = [..._cNpcs];
@@ -3848,8 +3874,22 @@ function buildModeInstruction(mode) {
     const _npcs = (state.data.characters.npcs || []).filter(n => n.name);
     const _npcListStr = _npcs.length ? _npcs.map(n => n.name).join('、') : '（无NPC）';
     // 注：NPC完整人设已由 System Prompt L4 注入，此处仅保留姓名列表用于约束
-    const _connCount = _npcs.length; // 有几个NPC就生成几条，最多3条
-    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。围绕主控"' + _aMe + '"与主线剧情的故事事件和待处理意外，可涉及特殊NPC和NPC，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与主线剧情的突发消息、意外状况或生活意外，可涉及特殊NPC和NPC，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n（' + _connCount + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _npcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
+    // 羁绊板块专用池：从星标NPC中随机选3个（星标仅作用于羁绊板块，其余板块仍用全部NPC列表）
+    const _starNpcs = _npcs.filter(n => n.starred);
+    let _connNpcs = _starNpcs;
+    if (_starNpcs.length > 3) {
+      const _shuffled = [..._starNpcs];
+      for (let i = _shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [_shuffled[i], _shuffled[j]] = [_shuffled[j], _shuffled[i]];
+      }
+      _connNpcs = _shuffled.slice(0, 3);
+    }
+    const _connNpcListStr = _connNpcs.length ? _connNpcs.map(n => n.name).join('、') : '（无星标NPC）';
+    const _connSection = _connNpcs.length
+      ? '（' + _connNpcs.length + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下星标NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _connNpcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）'
+      : '（本月无羁绊进展：当前没有标记的NPC。仅保留===CONNECTION===标记，标记后不输出任何条目，下一板块直接从===NEWS===开始）';
+    return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。围绕主控"' + _aMe + '"与主线剧情的故事事件和待处理意外，可涉及特殊NPC和NPC，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与主线剧情的突发消息、意外状况或生活意外，可涉及特殊NPC和NPC，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n' + _connSection + '\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -8229,6 +8269,14 @@ function saveMainStory() {
 let editorCharType = null;
 let editorPendingAvatar = null; // temp avatar preview, committed on save
 let editorNpcId = null;          // 编辑NPC时记录目标id；null=新增NPC或非NPC编辑
+let editorNpcStarred = false;    // 编辑NPC时的星标暂存（随表单一起保存，取消不生效）
+
+// 星标开关：星标NPC进入晨报羁绊板块的选择池，仅作用于羁绊生成，其余逻辑不变
+function toggleNpcStar() {
+  editorNpcStarred = !editorNpcStarred;
+  const btn = document.getElementById('npc-star-btn');
+  if (btn) btn.classList.toggle('on', editorNpcStarred);
+}
 
 // 从好友列表头像进入NPC设定：npcId 为空表示新增
 function openNpcEditor(npcId) {
@@ -8271,16 +8319,21 @@ function openCharacterEditor(type, npcId) {
   } else {
     return;
   }
+  editorNpcStarred = !!(editorNpcId && c.starred);
 
   const avatarHtml = c.avatar
     ? `<img src="${c.avatar}" alt="头像">`
     : `<span class="avatar-frame-placeholder">${escapeHtml(getAvatarChar(c.name, avatarFallback))}</span>`;
 
   const hintHtml = c.avatar ? '更换头像' : '点击上传';
+  // 星标开关仅编辑已有NPC时显示（新增NPC保存后再标记）
+  const starBtnHtml = editorNpcId
+    ? `<button class="npc-star-btn${editorNpcStarred ? ' on' : ''}" id="npc-star-btn" onclick="toggleNpcStar()" title="${editorNpcStarred ? '已标记：进入晨报羁绊选择池（点击取消）' : '标记：进入晨报羁绊选择池'}"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></button>`
+    : '';
 
   showModal(`
     <div class="modal">
-      <div class="modal-header">${title}</div>
+      <div class="modal-header">${title}${starBtnHtml}</div>
       <div class="modal-body">
         <div class="avatar-picker">
           <div class="avatar-frame" onclick="document.getElementById('avatar-file-input').click()">
@@ -8422,6 +8475,7 @@ function saveCharacter(type) {
         npc.oneLiner = fields.oneLiner; npc.appearance = fields.appearance;
         npc.personality = fields.personality; npc.background = fields.background; npc.other = fields.other;
         if (fields.avatar !== undefined) npc.avatar = fields.avatar;
+        npc.starred = editorNpcStarred;
       }
     } else {
       // 新增NPC
