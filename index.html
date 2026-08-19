@@ -4746,7 +4746,7 @@ function buildGroupMessageHtml(msg, idx, npcs, grp) {
   if (isMe) {
     const avatarInner = meChar.avatar ? '' : escapeHtml(getAvatarChar(meChar.name, '我'));
     return `
-      <div class="msg-row me" data-idx="${idx}">
+      <div class="msg-row me" data-idx="${idx}" onclick="showGroupMsgActions(${idx})">
         <div class="chat-avatar me">${avatarInner}</div>
         <div class="msg-bubble">${escapeHtml(msg.content)}</div>
       </div>`;
