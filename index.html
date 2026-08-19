@@ -319,17 +319,6 @@ html:-webkit-full-screen #app{
   font-weight:300;
   letter-spacing:0.5px;
 }
-.chat-load-more{
-  text-align:center;
-  padding:10px 16px;
-  margin:4px 0 2px;
-  font-size:12px;
-  color:var(--text-dim);
-  cursor:pointer;
-  border-radius:8px;
-  transition:background 0.15s;
-}
-.chat-load-more:active{background:rgba(255,255,255,0.06)}
 .chat-load-sentinel{
   min-height:0;
   overflow:visible;
@@ -1062,28 +1051,6 @@ html:-webkit-full-screen #app{
   line-height:1.5;
 }
 /* 归档月份查看视图 */
-.calendar-page-archive-header{
-  display:flex;
-  align-items:center;
-  padding:12px 16px;
-  border-bottom:1px solid var(--border);
-  gap:12px;
-}
-.calendar-page-archive-back{
-  font-size:13px;
-  color:var(--text-dim);
-  background:transparent;
-  border:none;
-  cursor:pointer;
-  font-family:inherit;
-  padding:4px 0;
-}
-.calendar-page-archive-back:active{color:var(--gold)}
-.calendar-page-archive-header > span{
-  font-size:14px;
-  color:var(--text-main);
-  letter-spacing:1px;
-}
 .calendar-page-archive-section-title{
   font-size:11px;
   color:var(--text-faint);
@@ -2596,6 +2563,7 @@ const DEFAULT_DATA = {
   calendarEvents: [],   // 当前月的时间轴事件（日历页显示）[{id, date, title, desc, isKey, advanced}]
   calendarMonth: '',    // 当前游戏月份 '第x年x月'，空=未开始
   calendarMonthStartedAt: 0,  // 当前游戏月开始时的真实时间戳（Date.now()），用于过滤当月聊天记录
+  calendarPrevMonthStartedAt: 0,  // 上月（刚结束月）开始时间戳：晨报/日历生成的聊天窗口下界
   calendarMonthReport: '',  // AI生成的当月晨报文本
   calendarArchives: [],  // 过往晨报页归档 [{id, month, monthReport, memos, notifications, menu, social, connections, dailyNews}]
   calendarTimelineArchives: [],   // 过往日历页归档 [{id, month, events:[], cards:[]}]
@@ -2607,7 +2575,8 @@ const DEFAULT_DATA = {
   calendarConnections: [],  // Connections/羁绊：最多3条NPC关系进展 [{pair, text}]
   calendarDailyNews: [],    // Daily News：3条新闻简报 [{title, body, comments:[{author,text}]}]
   storyState: '',  // 主线剧情状态快照（注入每个NPC的系统指令；由关键剧情保存时提炼，注入聊天持续复用）
-  storyStateStale: false,  // 快照是否过期（true=下次聊天开新会话）
+  storyStateMeta: null,  // 快照元信息 { month, eventTitle, generatedAt, note }：记录当前快照的生成来源，便于排查失真
+  pendingSessionBreak: false,  // 挂起的时间分隔线信号：自上次聊天后剧情有新进展（投递愿望/前置剧情/保存事件/过月）时置位；下一条聊天消息消费它开新会话（画时间戳分隔线），快照本身不受影响
   storyStateBeforeMonthEvents: '',  // 共用快照备份（单槽）：本月首次保存关键事件（晨报线或日历线）前的快照；刷新对应页且该线有已保存事件时回退
   mainStory: '',  // 主线剧情约束（用户在设定页手填，注入所有NPC的系统指令）
   apiConfig: {
@@ -2809,6 +2778,7 @@ function normalizeNpcModel() {
   if (!Array.isArray(d.calendarEvents)) d.calendarEvents = [];
   if (typeof d.calendarMonth !== 'string') d.calendarMonth = '';
   if (typeof d.calendarMonthStartedAt !== 'number') d.calendarMonthStartedAt = 0;
+  if (typeof d.calendarPrevMonthStartedAt !== 'number') d.calendarPrevMonthStartedAt = 0;
   if (typeof d.calendarMonthReport !== 'string') d.calendarMonthReport = '';
   if (!Array.isArray(d.calendarArchives)) d.calendarArchives = [];
   if (!Array.isArray(d.calendarTimelineArchives)) d.calendarTimelineArchives = [];
@@ -2823,6 +2793,14 @@ function normalizeNpcModel() {
   if (typeof d.activeGroupId !== 'string') d.activeGroupId = '';
   // 共用快照备份字段初始化 + 历史版本迁移（分线字段合并为单槽）
   if (typeof d.storyStateBeforeMonthEvents !== 'string') d.storyStateBeforeMonthEvents = '';
+  // 快照元信息（旧存档无此字段，初始化为 null）
+  if (!d.storyStateMeta || typeof d.storyStateMeta !== 'object') d.storyStateMeta = null;
+  // 旧版字段迁移：storyStateStale（快照过期标记）→ pendingSessionBreak（挂起的会话分隔信号）
+  if (typeof d.storyStateStale === 'boolean') {
+    d.pendingSessionBreak = d.storyStateStale;
+    delete d.storyStateStale;
+  }
+  if (typeof d.pendingSessionBreak !== 'boolean') d.pendingSessionBreak = false;
   if (typeof d.storyStateBeforeMorningEvents === 'string' || typeof d.storyStateBeforeCalendarEvents === 'string') {
     if (!d.storyStateBeforeMonthEvents) {
       d.storyStateBeforeMonthEvents = d.storyStateBeforeMorningEvents || d.storyStateBeforeCalendarEvents || '';
@@ -2867,22 +2845,6 @@ function switchNpcChat(npcId) {
   state.chatView = 'chat';
   renderChat();
   updateChatHeaderTitle();
-}
-
-// 规范化 apiConfig：Soul 为全新游戏，不再兼容 Echo 旧版多 provider 格式。
-// 仅校验并补全统一格式 {baseUrl, apiKey, model, models, temperature, frequencyPenalty, presencePenalty}。
-function migrateApiConfig(cfg) {
-  const def = DEFAULT_DATA.apiConfig;
-  if (!cfg || typeof cfg !== 'object') return structuredClone(def);
-  return {
-    baseUrl: cfg.baseUrl || def.baseUrl,
-    apiKey: cfg.apiKey || '',
-    model: cfg.model || def.model,
-    models: Array.isArray(cfg.models) ? cfg.models : [],
-    temperature: (typeof cfg.temperature === 'number') ? cfg.temperature : def.temperature,
-    frequencyPenalty: (typeof cfg.frequencyPenalty === 'number') ? cfg.frequencyPenalty : def.frequencyPenalty,
-    presencePenalty: (typeof cfg.presencePenalty === 'number') ? cfg.presencePenalty : def.presencePenalty
-  };
 }
 
 function deepMerge(base, override) {
@@ -3122,8 +3084,15 @@ function autoResizeInput(el) {
     el.style.height = 'auto';
     return;
   }
+  // 高度重置为auto的瞬间内容塌缩，浏览器会把外层滚动容器的scrollTop钳制到0
+  // （表现为输入时视图跳到顶部）。先记录textarea自身及最近滚动容器的位置，重设高度后恢复
+  const scroller = el.closest('.modal-body, #calendar-content, #calendar-page-cards, #chat-messages');
+  const innerTop = el.scrollTop;
+  const outerTop = scroller ? scroller.scrollTop : 0;
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 'px';
+  el.scrollTop = innerTop;
+  if (scroller) scroller.scrollTop = outerTop;
 }
 
 // 置顶：滚动到第一条
@@ -3653,12 +3622,6 @@ function truncateText(text, maxLen) {
   return t;
 }
 
-// Render text as <p> paragraphs, splitting on newlines for visual spacing
-function renderParagraphs(text) {
-  if (!text) return '';
-  return text.split(/\n+/).filter(p => p.trim()).map(p => `<p>${escapeHtml(p.trim())}</p>`).join('');
-}
-
 // Format narrative text: paragraph breaks + 「」italic (thoughts) + ""bold (dialogue)
 function formatNarrativeText(text) {
   if (!text) return '';
@@ -3775,11 +3738,11 @@ function buildMainStoryPrompt() {
   return '\n【主线剧情约束】\n' + ms.trim() + '\n';
 }
 
-// L8 即时上下文：最近记录
+// L9 即时上下文：最近记录
 // 双向打通：聊天能看到近期剧情，剧情能看到近期聊天
 function buildHistoryMessages(mode, isContinuation) {
-  const MAX_PRIMARY = 25;     // 主上下文条数上限
-  const MAX_CROSS = 10;       // 跨模块注入条数上限
+  const MAX_PRIMARY = 10;     // 事件链主上下文上限（聚焦当前剧情段，超长链只带最近部分）
+  const MAX_CHAT = 25;        // 单聊历史条数上限
 
   let primary = [];
   let cross = [];
@@ -3794,27 +3757,21 @@ function buildHistoryMessages(mode, isContinuation) {
     const chatHist = state.data.chatHistory;
     const excludeLast = !isContinuation && chatHist.length > 0 && chatHist[chatHist.length - 1].role === 'user';
     const sliceSource = excludeLast ? chatHist.slice(0, -1) : chatHist;
-    primary = sliceSource.slice(-MAX_PRIMARY).map(h => ({
+    primary = sliceSource.slice(-MAX_CHAT).map(h => ({
       role: h.role === 'user' ? 'user' : 'assistant',
       content: h.content || ''
     }));
-    // 跨模块剧情注入：故事状态快照已在 System Prompt 中注入（L6），此处不再重复注入事件全文
+    // 跨模块剧情注入：故事状态快照已在 System Prompt 中注入（L7），此处不再重复注入事件全文
     // 避免旧事件叙事干扰AI对当前时间节点的感知
   } else if (mode === 'event') {
-    // 剧情模式：主上下文是剧情事件链，跨模块注入近期聊天
+    // 剧情模式：主上下文是剧情事件链，跨模块注入当月全部NPC对话
     primary = state.data.eventHistory.flatMap(e => [
       { role: 'user', content: `剧情愿望：${e.wish}` },
       { role: 'assistant', content: e.aiNarrative }
     ]).slice(-MAX_PRIMARY);
-    const recentChats = state.data.chatHistory.slice(-MAX_CROSS);
-    if (recentChats.length > 0) {
-      const _meName = (state.data.characters.me.name || '').trim() || '主控';
-      const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-      const chatSummary = recentChats.map(h => {
-        const speaker = h.role === 'user' ? _meName : _otherName;
-        return `${speaker}：${h.content || ''}`;
-      }).join('\n');
-      cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态和约定，叙事中可自然承接）】\n${chatSummary}` });
+    const chatCtx = collectMonthlyNpcChats();
+    if (chatCtx) {
+      cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态和约定，叙事中可自然承接）】\n${chatCtx}` });
     }
   } else if (mode === 'polish') {
     // 润色模式：注入近期剧情叙事作为上下文，确保润色文本与上文衔接
@@ -3822,15 +3779,9 @@ function buildHistoryMessages(mode, isContinuation) {
       { role: 'user', content: `剧情愿望：${e.polishedWish || e.wish || ''}` },
       { role: 'assistant', content: e.aiNarrative || '' }
     ]).slice(-MAX_PRIMARY);
-    const recentChats = state.data.chatHistory.slice(-MAX_CROSS);
-    if (recentChats.length > 0) {
-      const _meName = (state.data.characters.me.name || '').trim() || '主控';
-      const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-      const chatSummary = recentChats.map(h => {
-        const speaker = h.role === 'user' ? _meName : _otherName;
-        return `${speaker}：${h.content || ''}`;
-      }).join('\n');
-      cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态，勿在叙事中复述）】\n${chatSummary}` });
+    const chatCtx = collectMonthlyNpcChats();
+    if (chatCtx) {
+      cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态，勿在叙事中复述）】\n${chatCtx}` });
     }
   }
 
@@ -3838,7 +3789,7 @@ function buildHistoryMessages(mode, isContinuation) {
   return [...cross, ...primary];
 }
 
-// L7 模式指令：根据 mode 动态注入
+// L8 模式指令：根据 mode 动态注入
 function buildModeInstruction(mode) {
   if (mode === 'chat') {
     const meName = state.data.characters.me.name || '主控角色';
@@ -3908,20 +3859,113 @@ function buildModeInstruction(mode) {
   return '';
 }
 
-// L6 故事状态快照：注入缓存的当前故事状态
-// 快照在首次文字聊天时提炼并缓存，后续聊天持续注入（不消费、不删除）
-// 新事件生成时标记过期，下次文字聊天重新提炼
-// 快照基于近几月日历事件数据（calendarTimelineArchives + 当月事件）生成
+// L7 故事状态快照（主状态，紧贴对话以提升权重）：注入缓存的当前故事状态
+// 快照仅在保存关键事件时生成（合并调用），聊天只注入、不生成
+// 新事件生成时标记过期，下次文字/群聊仅开新会话边界（不重新提炼）
+// 快照基于近几月日历事件数据（calendarTimelineArchives + 当月事件）归纳
 function buildStoryStatePrompt() {
   const ss = state.data.storyState;
   if (!ss || !ss.trim()) return '';
   return '\n【当前故事状态（供你内在感知剧情进展）】\n' + ss.trim() + '\n';
 }
 
-// 完整 System Prompt 拼装：L1 → L2 → L3 → L4 → L5 → L6 → L7
+// L6 时间线上下文（辅助层，置于快照之前）：日历时间轴与晨报三板块
+// 供聊天/群聊感知具体事件细节（快照只有五维概述，细节断层在此补齐）
+// 取数只用固定数据，不读记忆卡片池（那是展示给玩家的UI）：
+//   日历线关键事件总结 → 保存时写回事件自身的 e.summary
+//   晨报线关键事件总结 → 事件链总结记录（当月在 eventHistory，归档月在 calendarTimelineArchives[].eventHistory 的 isSummary 条目）
+// 日历注入日常事件全文+关键事件总结；晨报只取备忘/通知/羁绊，备忘/通知触发过已保存事件链的附上总结记忆卡
+// scope：'chat'（默认）= 近2个月归档+当月，供聊天/群聊
+//        'calendar' = 仅近3个月归档、不含当月，供日历/晨报生成与刷新（当月内容即将重新生成，注入会自我循环）
+function buildTimelineContextPrompt(scope) {
+  const isCalendar = scope === 'calendar';
+  const months = isCalendar ? 3 : 2;
+  let ctx = '';
+
+  // 单条日历事件 → 注入行（关键事件取保存时写回的总结；未保存的关键事件不剧透）
+  const eventLine = (e) => {
+    if (e.isKey) {
+      return e.summary ? `【${e.date || ''}】${e.title}（关键）：${e.summary}` : '';
+    }
+    return `【${e.date || ''}】${e.title}：${e.desc || ''}`;
+  };
+
+  const tlArchives = state.data.calendarTimelineArchives || [];
+
+  // 1. 历史时间轴（日历线事件）
+  const recentTl = tlArchives.slice(-months);
+  if (recentTl.length) {
+    ctx += '\n【近月时间线（已发生的事实）】\n';
+    recentTl.forEach(arch => {
+      const lines = [];
+      (arch.events || []).forEach(e => {
+        const line = eventLine(e);
+        if (line) lines.push(line);
+      });
+      if (lines.length) ctx += `◆ ${arch.month}\n${lines.join('\n')}\n`;
+    });
+  }
+
+  // 2. 当月时间轴（日历线事件；日历/晨报生成不注入当月）
+  const currentMonth = state.data.calendarMonth || '当月';
+  if (!isCalendar) {
+    const currentEvents = state.data.calendarEvents || [];
+    const hasCurrent = currentEvents.some(e => e.isKey ? e.summary : true);
+    if (hasCurrent) {
+      ctx += `\n【${currentMonth} 时间线（当前月份已发生的事实）】\n`;
+      currentEvents.forEach(e => {
+        const line = eventLine(e);
+        if (line) ctx += line + '\n';
+      });
+    }
+  }
+
+  // 3. 晨报三板块（归档月份；对话模式另含当月）
+  // 某月晨报 → 注入文本；备忘/通知触发过已保存事件链的，附上该事件的总结记忆卡（保存时生成的总结，与记忆卡片内容一致）
+  const morningBlock = (month, memos, notifications, connections, history) => {
+    const getChainSummary = (type, index) => {
+      const evtId = `morning_${type}_${index}_${month}`;
+      const s = (history || []).find(e => e.calendarEventId === evtId && e.isSummary);
+      return s && s.aiNarrative ? s.aiNarrative.trim() : '';
+    };
+    const lines = [];
+    (memos || []).forEach((m, i) => {
+      if (!m) return;
+      const sum = getChainSummary('memo', i);
+      lines.push(sum ? `备忘：${m.trim()}（该备忘已展开为关键事件，总结记忆卡：${sum}）` : `备忘：${m}`);
+    });
+    (notifications || []).forEach((n, i) => {
+      if (!n) return;
+      const sum = getChainSummary('notif', i);
+      lines.push(sum ? `通知：${n.trim()}（该通知已展开为关键事件，总结记忆卡：${sum}）` : `通知：${n}`);
+    });
+    (connections || []).forEach(c => {
+      if (c && c.pair) lines.push(`羁绊：${c.pair}——${c.text || ''}`);
+    });
+    return lines.length ? `◆ ${month}\n${lines.join('\n')}\n` : '';
+  };
+
+  const calArchives = state.data.calendarArchives || [];
+  const morningBlocks = calArchives.slice(-months).map(arch => {
+    const archTl = tlArchives.find(a => a.month === arch.month);
+    return morningBlock(arch.month, arch.memos, arch.notifications, arch.connections, (archTl && archTl.eventHistory) || []);
+  });
+  // 当月晨报未归档，直接读当前数据与当前事件链（仅对话模式；日历/晨报生成不含当月）
+  if (!isCalendar && ((state.data.calendarMemos || []).length || (state.data.calendarNotifications || []).length || (state.data.calendarConnections || []).length)) {
+    morningBlocks.push(morningBlock(currentMonth, state.data.calendarMemos, state.data.calendarNotifications, state.data.calendarConnections, state.data.eventHistory));
+  }
+  const morningCtx = morningBlocks.filter(Boolean).join('');
+  if (morningCtx) {
+    ctx += `\n【近月晨报（背景信息，自然感知即可，勿主动复述）】\n${morningCtx}`;
+  }
+
+  return ctx;
+}
+
+// 完整 System Prompt 拼装：L1 → L2 → L3 → L4 → L5 → L6（时间线，辅助）→ L7（快照，主状态）→ L8（模式指令）
 // 越靠后的层越接近用户消息，AI 读取权重越高（attention recency bias）
-// 因此将人设和主线剧情后移，让它们更接近实际对话，提升约束力
-// L8（即时上下文）作为 history messages 单独传入，不拼入 system prompt
+// 因此将人设、主线剧情和快照后移，让它们更接近实际对话，提升约束力；时间线为辅助层置于快照前
+// L9（即时上下文）作为 history messages 单独传入，不拼入 system prompt
 function buildSystemPrompt(mode) {
   let prompt = '';
   prompt += buildBaseAnchor();        // L1 基础锚定
@@ -3929,8 +3973,16 @@ function buildSystemPrompt(mode) {
   prompt += buildRulesPrompt();      // L3 外部规则（舞台背景，前置铺垫）
   prompt += buildCharacterPrompt();  // L4 人设库（后移，更接近对话）
   prompt += buildMainStoryPrompt();  // L5 主线剧情约束（高权重，后移）
-  prompt += buildStoryStatePrompt(); // L6 故事状态快照
-  prompt += buildModeInstruction(mode); // L7 模式指令
+  if (mode === 'chat' || mode === 'event' || mode === 'polish') {
+    // L6 时间线上下文（辅助层）：聊天/事件链/润色注入当月+近2个月归档，置于快照之前
+    // 事件叙事可据此感知时间轴已发生事件与晨报背景，与剧情自然衔接
+    prompt += buildTimelineContextPrompt();
+  } else if (mode === 'calendarAll' || mode === 'calendarEvents') {
+    // L6 时间线上下文（辅助层）：日历/晨报生成与刷新注入近3个月归档（不含当月）
+    prompt += buildTimelineContextPrompt('calendar');
+  }
+  prompt += buildStoryStatePrompt(); // L7 故事状态快照（主状态，紧贴对话）
+  prompt += buildModeInstruction(mode); // L8 模式指令
   return prompt;
 }
 
@@ -3944,7 +3996,7 @@ async function callAI(userMessage, mode) {
   const systemPrompt = buildSystemPrompt(mode);
   // 空发送续写时，userMessage 是系统提示而非真实用户消息，不需要排除 chatHistory 最后一条
   const isContinuation = mode === 'chat' && userMessage.startsWith('（系统提示：');
-  // L8 即时上下文：最近20条记录，作为 history messages 注入
+  // L9 即时上下文：最近20条记录，作为 history messages 注入
   const historyMsgs = (mode === 'chat' || mode === 'event' || mode === 'polish') ? buildHistoryMessages(mode, isContinuation) : [];
 
   const messages = [
@@ -4803,9 +4855,11 @@ async function sendGroupChatMessage() {
     btn.disabled = true;
     showGroupTypingIndicator(grp);
     try {
-      // 快照过期时仅重置标记（聊天不生成新快照）
-      if (state.data.storyStateStale) {
-        state.data.storyStateStale = false;
+      // 剧情推进后的首次群聊空发送：消费挂起的分隔信号开新会话（与单聊一致）
+      if (state.data.pendingSessionBreak) {
+        state.chatSessionId++;
+        state.chatSessionStartTime = Date.now();
+        state.data.pendingSessionBreak = false;
         saveToStorage();
       }
 
@@ -4842,6 +4896,13 @@ async function sendGroupChatMessage() {
     return;
   }
 
+  // 文字发送：剧情有新进展（挂起的分隔信号）时开新会话并消费信号，再推送用户消息
+  if (state.data.pendingSessionBreak) {
+    state.chatSessionId++;
+    state.chatSessionStartTime = Date.now();
+    state.data.pendingSessionBreak = false;
+  }
+
   // 添加用户消息
   grp.chatHistory.push({
     role: 'user',
@@ -4857,12 +4918,6 @@ async function sendGroupChatMessage() {
   showGroupTypingIndicator(grp);
 
   try {
-    // 快照过期时仅重置标记（聊天不生成新快照）
-    if (state.data.storyStateStale) {
-      state.data.storyStateStale = false;
-      saveToStorage();
-    }
-
     // 单次AI调用生成群聊回复，prompt中要求接力互动
     const reply = await callAIGroupChat(text, grp);
     removeTypingIndicator();
@@ -4942,11 +4997,13 @@ async function callAIGroupChat(userMessage, grp, isAutoChat) {
   systemPrompt += buildRulesPrompt();
   systemPrompt += memberPrompt;
   systemPrompt += buildMainStoryPrompt();
+  // L6 时间线上下文（辅助层，置于快照之前）：补齐快照缺失的事件细节（与单聊一致）
+  systemPrompt += buildTimelineContextPrompt();
   systemPrompt += buildStoryStatePrompt();
   systemPrompt += groupModePrompt;
 
   // 构建 history messages
-  const MAX_HISTORY = 20;
+  const MAX_HISTORY = 25;
   const recentHistory = grp.chatHistory.slice(-MAX_HISTORY).map(h => {
     if (h.role === 'user') {
       return { role: 'user', content: h.content };
@@ -5179,11 +5236,11 @@ async function sendChatMessage() {
     showTypingIndicator();
     try {
       let reply;
-      if (state.data.storyStateStale) {
+      if (state.data.pendingSessionBreak) {
         // 新事件后首次空发送 → AI角色主动发消息（开新会话，不生成快照）
         state.chatSessionId++;
         state.chatSessionStartTime = Date.now();
-        state.data.storyStateStale = false;
+        state.data.pendingSessionBreak = false;
         saveToStorage();
         reply = await callAI('（系统提示：刚刚发生了一些事，你主动给主控角色发了一条消息。请直接输出这条消息，不要加任何说明或引号，内容要贴合近期事件和你的性格，像平时发微信一样自然。）', 'chat');
       } else if (lastIsUser) {
@@ -5215,10 +5272,11 @@ async function sendChatMessage() {
     return;
   }
 
-  // 文字发送：如果快照过期，开新会话（不生成快照）
-  if (state.data.storyStateStale) {
+  // 文字发送：剧情有新进展（挂起的分隔信号）时开新会话并消费信号，再推送用户消息
+  if (state.data.pendingSessionBreak) {
     state.chatSessionId++;
     state.chatSessionStartTime = Date.now();
+    state.data.pendingSessionBreak = false;
   }
 
   // Normal send: add user message, AI replies once
@@ -5236,11 +5294,6 @@ async function sendChatMessage() {
 
   try {
     showTypingIndicator();
-    // 快照过期时仅重置标记（聊天不生成新快照）
-    if (state.data.storyStateStale) {
-      state.data.storyStateStale = false;
-      saveToStorage();
-    }
     const reply = await callAI(finalText, 'chat');
     removeTypingIndicator();
 
@@ -5587,11 +5640,6 @@ function buildEventBlockHtml(evt) {
   return html;
 }
 
-function getCurrentMonth() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-}
-
 // 记忆卡区域（沿用记忆模块样式）
 // ====== 日历页：6个区块 ======
 
@@ -5616,14 +5664,6 @@ function isMorningEventSaved(type, index) {
   const month = state.data.calendarMonth || 'unknown';
   const evtId = `morning_${type}_${index}_${month}`;
   return state.data.eventHistory.some(e => e.calendarEventId === evtId && e.isSummary);
-}
-
-// 检查归档月份的晨报关键事件是否已推进（从对应日历归档的 eventHistory 中查找）
-function isArchivedMorningEventSaved(type, index, month) {
-  const evtId = `morning_${type}_${index}_${month}`;
-  const archive = (state.data.calendarTimelineArchives || []).find(a => a.month === month);
-  if (!archive || !archive.eventHistory) return false;
-  return archive.eventHistory.some(e => e.calendarEventId === evtId && e.isSummary);
 }
 
 // 检查归档月份的晨报关键事件是否有事件链（只要有任意记录即可点击查看）
@@ -6175,9 +6215,37 @@ function renderActiveEventInput() {
   else { renderCalendarPageEventInput(); }
 }
 
+// 事件输入草稿保留：重渲染输入栏时捕获/恢复未投递的文本
+// 跳转页面后返回事件视图不丢内容；按事件ID隔离，切换事件不串内容
+function captureEventInputDraft() {
+  const el = document.getElementById('event-input');
+  if (el && el.dataset.eventId) state._eventInputDraft = { eventId: el.dataset.eventId, text: el.value };
+}
+function restoreEventInputDraft() {
+  const el = document.getElementById('event-input');
+  if (!el || !el.dataset.eventId) return;
+  const draft = state._eventInputDraft;
+  if (draft && draft.eventId === el.dataset.eventId && draft.text) {
+    el.value = draft.text;
+    autoResizeInput(el);
+  }
+}
+
+// 点击事件链输入框时，事件内容滚动到最下方（最新叙事），等待键盘弹起动画
+function scrollEventChainToBottom() {
+  setTimeout(function() {
+    const container = isMorningEvent()
+      ? document.getElementById('calendar-content')
+      : document.getElementById('calendar-page-cards');
+    if (container) container.scrollTop = container.scrollHeight;
+  }, 300);
+}
+
 function renderCalendarInput() {
   const inputArea = document.getElementById('calendar-input-area');
   if (!inputArea) return;
+  // 重渲染前捕获输入草稿
+  captureEventInputDraft();
 
   // 晨报事件推进视图：渲染事件输入栏（浮标悬停在晨报内）
   if (isMorningEvent()) {
@@ -6191,9 +6259,10 @@ function renderCalendarInput() {
       const placeholder = state.eventState === 'active' ? '继续投递剧情愿望...' : '写下你的剧情愿望...';
       inputArea.classList.add('input-bar-active');
       inputArea.innerHTML = `
-        <textarea id="event-input" rows="1" placeholder="${placeholder}" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
+        <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
         <button onmousedown="event.preventDefault()" onclick="sendCalendarEventWish()">投递</button>
       `;
+      restoreEventInputDraft();
       return;
     }
   }
@@ -6207,32 +6276,13 @@ function renderCalendar() {
   renderCalendarInput();
 }
 
-// 生成全部晨报内容（内部核心逻辑，可被 advanceToNextMonth 复用）
-// 收集当月上下文，供晨报各模块生成时注入（层面一）
-function buildMonthlyContextForCalendar() {
-  let ctx = '\n【历史上下文（生成时务必紧扣这些内容）】\n';
-
-  // 注：故事状态快照和主线剧情已由 System Prompt L5/L6 注入，此处不重复
-
-  // 1. 归档日历事件（最近2个月，全文）
-  const archives = state.data.calendarTimelineArchives || [];
-  const recentArchives = archives.slice(-2);
-  if (recentArchives.length) {
-    ctx += '【归档日历事件】\n';
-    recentArchives.forEach(arch => {
-      ctx += `${arch.month}：\n`;
-      (arch.events || []).forEach(e => {
-        ctx += `- ${e.title}：${e.desc}\n`;
-        if (e.summary) ctx += `  总结：${e.summary}\n`;
-      });
-    });
-  }
-
-  // 2. 当月聊天记录（权重最低，超限时截断）
+// 当月全部NPC的对话记录（供事件链/润色跨模块注入）
+// 按当月开始时间戳过滤；超过6000字符时只保留最近部分（按行边界截断，避免截断在句子中间）
+function collectMonthlyNpcChats() {
   const npcs = state.data.characters.npcs || [];
   const meName = (state.data.characters.me.name || '').trim() || '主控';
   const monthStart = state.data.calendarMonthStartedAt || 0;
-  const MAX_CHAT_CHARS = 6000; // 聊天记录字符上限，超出时只取最近消息
+  const MAX_CHAT_CHARS = 6000;
   let chatCtx = '';
   npcs.forEach(npc => {
     if (!npc.id || !npc.name) return;
@@ -6248,28 +6298,62 @@ function buildMonthlyContextForCalendar() {
       }
     }
   });
-  // 超限时只取最近的消息（按行边界截断，避免截断在句子中间）
   if (chatCtx.length > MAX_CHAT_CHARS) {
     const sliced = chatCtx.slice(-MAX_CHAT_CHARS);
     const firstNewline = sliced.indexOf('\n');
     const cleanSlice = firstNewline > 0 ? sliced.slice(firstNewline + 1) : sliced;
     chatCtx = '（聊天记录过长，仅保留最近部分）\n' + cleanSlice;
   }
-  ctx += chatCtx;
+  return chatCtx;
+}
 
-  // 3. 归档晨报（最近2个月，全文）
-  const calArchives = state.data.calendarArchives || [];
-  const recentCalArchives = calArchives.slice(-2);
-  if (recentCalArchives.length) {
-    ctx += '【归档晨报】\n';
-    recentCalArchives.forEach(arch => {
-      if (arch.monthReport && arch.monthReport.trim()) {
-        ctx += `${arch.month}：\n${arch.monthReport}\n`;
-      }
-    });
+// 上个月全部对话记录（NPC单聊+群聊，供晨报/日历生成与刷新注入）
+// 窗口=[上月起点, 本月起点)：过月生成时=刚结束月，月中刷新时=上一个月
+// 超过6000字符时只保留最近部分（按行边界截断）
+function collectPrevMonthAllChats() {
+  const npcs = state.data.characters.npcs || [];
+  const meName = (state.data.characters.me.name || '').trim() || '主控';
+  const curStart = state.data.calendarMonthStartedAt || 0;
+  const prevStart = state.data.calendarPrevMonthStartedAt || 0;
+  const MAX_CHAT_CHARS = 6000;
+  const inWindow = m => m.content && m.content.trim() && (!m.timestamp || (m.timestamp >= prevStart && m.timestamp < curStart));
+  let chatCtx = '';
+  npcs.forEach(npc => {
+    if (!npc.id || !npc.name) return;
+    const monthly = (getNpcChat(npc.id) || []).filter(inWindow);
+    if (monthly.length) {
+      chatCtx += `与${npc.name}上月对话：\n`;
+      monthly.forEach(m => {
+        const speaker = m.role === 'assistant' ? npc.name : meName;
+        chatCtx += `${speaker}：${m.content}\n`;
+      });
+    }
+  });
+  (state.data.groupChats || []).forEach(grp => {
+    if (!grp.name) return;
+    const monthly = (grp.chatHistory || []).filter(inWindow);
+    if (monthly.length) {
+      chatCtx += `群聊「${grp.name}」上月对话：\n`;
+      monthly.forEach(m => {
+        const speaker = m.role === 'assistant' ? (m.speakerName || '成员') : meName;
+        chatCtx += `${speaker}：${m.content}\n`;
+      });
+    }
+  });
+  if (chatCtx.length > MAX_CHAT_CHARS) {
+    const sliced = chatCtx.slice(-MAX_CHAT_CHARS);
+    const firstNewline = sliced.indexOf('\n');
+    const cleanSlice = firstNewline > 0 ? sliced.slice(firstNewline + 1) : sliced;
+    chatCtx = '（聊天记录过长，仅保留最近部分）\n' + cleanSlice;
   }
+  return chatCtx;
+}
 
-  return ctx;
+// 晨报/日历生成与刷新的即时上下文：上个月全部对话（NPC单聊+群聊）
+// 历史归档（前3个月时间轴+晨报三板块）已由 System Prompt L6 注入，此处不重复
+function buildPrevMonthChatContext() {
+  const chatCtx = collectPrevMonthAllChats();
+  return chatCtx ? `\n【上月聊天记录（NPC与群聊，供感知人物关系与近况）】\n${chatCtx}` : '';
 }
 
 async function _generateCalendarContent(targetMonth) {
@@ -6277,7 +6361,7 @@ async function _generateCalendarContent(targetMonth) {
   const monthPrefix = month ? `当前是${month}。` : '';
 
   // 收集历史上下文，注入晨报生成
-  const monthlyCtx = buildMonthlyContextForCalendar();
+  const monthlyCtx = buildPrevMonthChatContext();
 
   // 单次调用生成全部 6 模块
   try {
@@ -6394,13 +6478,15 @@ async function generateCalendarAll(targetMonth) {
       // 3. 晨报线有已保存的关键事件 → 回退快照到共用备份（本月首次保存前），并清空备份
       if (hadMorningSaves && state.data.storyStateBeforeMonthEvents) {
         state.data.storyState = state.data.storyStateBeforeMonthEvents;
-        state.data.storyStateStale = false;
+        state.data.pendingSessionBreak = false;
         state.data.storyStateBeforeMonthEvents = '';
+        // 记录回退后的快照元信息
+        state.data.storyStateMeta = { month: state.data.calendarMonth || '', eventTitle: '', generatedAt: Date.now(), note: '已回退（刷新晨报撤销本月已保存事件）' };
       }
       saveToStorage();
     }
 
-    // 刷新晨报不生成新快照，仅使用已有快照（快照仅在过月/关键剧情完成时生成）
+    // 刷新晨报不生成新快照，仅使用已有快照（快照仅在保存关键事件时生成）
     await _generateCalendarContent(targetMonth);
   } catch(e) {
     showToast('生成失败：' + (e.message || '未知错误'));
@@ -6657,7 +6743,7 @@ async function generateEventPrequel(evt) {
       isPrequel: true,
       timestamp: Date.now()
     });
-    state.data.storyStateStale = true;
+    state.data.pendingSessionBreak = true;
     saveToStorage();
     state.eventState = 'idle';
     state.isLoading = false;
@@ -6741,7 +6827,7 @@ async function sendCalendarEventWish() {
       polishedWish: polished,
       timestamp: Date.now()
     });
-    state.data.storyStateStale = true;
+    state.data.pendingSessionBreak = true;
     saveToStorage();
     state.eventState = 'active';
     appendCalendarEvent(evtId);
@@ -6749,6 +6835,8 @@ async function sendCalendarEventWish() {
     renderActiveEventInput();
   } catch(e) {
     showToast('生成失败：' + (e.message || '未知错误'));
+    // 生成失败时恢复愿望草稿，避免用户输入丢失
+    state._eventInputDraft = { eventId: state.activeCalendarEvent, text: wish };
     state.eventState = 'input';
     updateCalendarStateUI();
     renderActiveEventInput();
@@ -6760,9 +6848,9 @@ async function sendCalendarEventWish() {
   }
 }
 
-// 从事件叙事AI响应中拆分叙事正文和状态快照
-// AI在叙事正文后输出 |||STATE||| 分隔符，再输出状态快照
-// 返回 { narrative: '叙事正文', state: '状态快照' }
+// 清洗事件叙事AI响应中残留的状态快照标记
+// 旧版叙事调用曾要求AI在正文后输出 |||STATE||| 状态快照，现仅作防御性清洗，正常情况无分隔符
+// 返回 { narrative: '叙事正文', state: '状态快照（若有）' }
 function parseNarrativeAndState(raw) {
   if (!raw) return { narrative: '', state: '' };
   const delimiter = '|||STATE|||';
@@ -6784,9 +6872,7 @@ function parseNarrativeAndState(raw) {
   };
 }
 
-// 生成故事状态快照：独立的API调用，基于近期事件提炼当前故事状态
-// 在用户首次文字聊天时触发（空发送不触发），结果缓存到 storyState 供后续聊天复用
-// 构建快照上下文数据（日历事件+聊天+晨报+主线），供快照生成和合并调用复用
+// 构建快照上下文数据（日历事件+聊天+晨报+主线），供合并生成调用（generateSummaryAndSnapshot）使用
 function buildSnapshotContext() {
   const _meName = (state.data.characters.me.name || '').trim() || '主控';
   const npcs = state.data.characters.npcs || [];
@@ -6910,61 +6996,6 @@ function buildSnapshotContext() {
   return { _meName, _npcListStr, timelineContext, chatContext, calendarContext, mainStory };
 }
 
-// 生成故事状态快照：独立的API调用，基于近期事件提炼当前故事状态
-// 在过月流程和关键剧情完成时调用
-async function generateStoryStateSnapshot() {
-  const config = state.data.apiConfig;
-  if (!config.apiKey) { console.log('[快照] 无API Key，跳过'); return ''; }
-
-  const { _meName, _npcListStr, timelineContext, chatContext, calendarContext, mainStory } = buildSnapshotContext();
-  console.log('[快照] 开始生成 | 主控:%s | NPC:%s | 月:%s', _meName, _npcListStr, state.data.calendarMonth);
-
-  const statePrompt = `请通读以下全部数据后，进行归纳总结，生成当前故事状态快照。关注权重递减为：关键事件 → 日历日常事件 → 聊天记录 → 晨报。
-
-要求：
-1. 提取关键信息：重要事件、角色关系变化、人物状态演变。尽量保留具体细节，如涉及的人物姓名、具体约定、关键道具、地点、转折点等，不要只写空泛的概括。
-2. 按以下维度逐项输出，每项以维度名为引导，内容为连贯叙述（自然带入所有相关人物，不要逐人分列）：
-  【近期经历】概括最近几个月发生了什么，体现从先前到现在的变化脉络。用故事内的相对时间表达。
-  【主线进展】主线剧情的当前推进阶段、核心冲突的演变、最近的关键转折。若未设置主线剧情，则概括当前故事的核心走向。
-  【关系动态】描述${_meName}与${_npcListStr}之间的关系当前态势，点出最具变化的关系即可。
-  【情感矛盾】当前存在的情感张力、未解决的冲突或暗流。具体指出矛盾双方和矛盾核心。
-  【角色状态】概括${_meName}及各NPC此刻的情绪心理和性格偏移，只点出有显著变化的角色。
-3. 一律使用人物姓名指代，不使用"你""角色"等模糊代词。
-4. 只记录已发生的事实，不加入推测或评价。
-5. 整体控制在800字以内，简洁凝练。
-6. 直接输出状态快照，不加任何额外说明。
-
-【主线剧情约束】
-${mainStory || '（未设置主线剧情）'}
-
-【日历事件数据（含关键事件、日常事件、叙事片段）】
-${timelineContext || '（无）'}
-
-【近期聊天记录】
-${chatContext || '（无）'}
-
-【晨报内容（当月+历史归档）】
-${calendarContext || '（无）'}`;
-
-  console.log('[快照] Prompt字数:%d', statePrompt.length);
-  if (statePrompt.length > 30000) {
-    console.warn('[快照] Prompt总字数 %d 超过 30000，可能触发 token 溢出', statePrompt.length);
-  }
-
-  const messages = [
-    { role: 'system', content: '你是一个故事状态总结助手。请通读全部数据后归纳总结，生成准确、具体的状态快照。保留具体细节，不要写空泛的概括。' },
-    { role: 'user', content: statePrompt }
-  ];
-  try {
-    const result = await callWithRetry(() => callOpenAICompatible(messages, config), 1);
-    console.log('[快照] 生成成功 | 返回字数:%d', result.length);
-    return result.trim();
-  } catch(e) {
-    console.error('[快照] 生成失败:', e);
-    return '';
-  }
-}
-
 // 合并生成事件总结+状态快照（1次API调用，替代原来的2次）
 // 用于关键剧情保存时，同时生成事件摘要和故事状态快照
 async function generateSummaryAndSnapshot(calEvt, chainEvents) {
@@ -7034,33 +7065,29 @@ ${calendarContext || '（无）'}
     { role: 'system', content: '你是一个故事状态总结助手。请按要求完成事件总结和状态快照两项任务。保留具体细节，不要写空泛的概括。' },
     { role: 'user', content: combinedPrompt }
   ];
-  try {
-    const result = await callWithRetry(() => callOpenAICompatible(messages, config), 1);
-    console.log('[合并生成] 返回字数:%d', result.length);
-    // 解析分隔符
-    const delimiter = '===SNAPSHOT===';
-    const idx = result.indexOf(delimiter);
-    if (idx !== -1) {
-      const summary = result.slice(0, idx).trim();
-      const snapshot = result.slice(idx + delimiter.length).trim();
-      console.log('[合并生成] 解析成功 | 总结:%d字 | 快照:%d字', summary.length, snapshot.length);
-      return { summary, snapshot };
-    }
-    // 模糊匹配
-    const altIdx = result.search(/==+SNAPSHOT==+/);
-    if (altIdx !== -1) {
-      const summary = result.slice(0, altIdx).trim();
-      const snapshot = result.slice(altIdx).replace(/^=+SNAPSHOT=+/, '').trim();
-      console.log('[合并生成] 模糊匹配成功 | 总结:%d字 | 快照:%d字', summary.length, snapshot.length);
-      return { summary, snapshot };
-    }
-    // 无分隔符：整体当总结，快照为空（降级为仅总结）
-    console.warn('[合并生成] 未找到分隔符，整体作为总结返回');
-    return { summary: result.trim(), snapshot: '' };
-  } catch(e) {
-    console.error('[合并生成] 生成失败:', e);
-    return { summary: '', snapshot: '' };
+  // 失败直接抛出，由调用方（saveCalendarKeyEvent）统一提示并中止保存流程
+  const result = await callWithRetry(() => callOpenAICompatible(messages, config), 1);
+  console.log('[合并生成] 返回字数:%d', result.length);
+  // 解析分隔符
+  const delimiter = '===SNAPSHOT===';
+  const idx = result.indexOf(delimiter);
+  if (idx !== -1) {
+    const summary = result.slice(0, idx).trim();
+    const snapshot = result.slice(idx + delimiter.length).trim();
+    console.log('[合并生成] 解析成功 | 总结:%d字 | 快照:%d字', summary.length, snapshot.length);
+    return { summary, snapshot };
   }
+  // 模糊匹配
+  const altIdx = result.search(/==+SNAPSHOT==+/);
+  if (altIdx !== -1) {
+    const summary = result.slice(0, altIdx).trim();
+    const snapshot = result.slice(altIdx).replace(/^=+SNAPSHOT=+/, '').trim();
+    console.log('[合并生成] 模糊匹配成功 | 总结:%d字 | 快照:%d字', summary.length, snapshot.length);
+    return { summary, snapshot };
+  }
+  // 无分隔符：整体当总结，快照为空（降级为仅总结）
+  console.warn('[合并生成] 未找到分隔符，整体作为总结返回');
+  return { summary: result.trim(), snapshot: '' };
 }
 
 function editNarrative(evtId, side) {
@@ -7158,7 +7185,7 @@ async function doRefreshNarrative(evtId, side) {
           });
           const summaryPrompt = `请根据以下关键事件的内容，生成一段事件总结（类似记忆卡片）。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n\n事件内容：\n${eventContent}\n\n要求：\n1. 总结关键信息：重要事件、角色关系变化、人物状态演变。\n2. 尽量保留具体细节，如涉及的人物姓名、具体约定、关键道具、地点、转折点等，不要只写空泛的概括。\n3. 一段简洁的摘要，不超过400字。一律使用人物姓名指代——主控角色用"${_meName}"，AI角色用"${_otherName}"。\n4. 只记录已发生的事实，不加入推测或评价。\n5. 直接输出摘要正文，不要加任何标题、标记或说明。`;
           evt.aiNarrative = await callAI(summaryPrompt, 'eventNarrative');
-          state.data.storyStateStale = true;
+          state.data.pendingSessionBreak = true;
         }
       } else if (evt.isPrequel) {
         // 前置剧情Retry：重新生成场景铺垫
@@ -7170,7 +7197,7 @@ async function doRefreshNarrative(evtId, side) {
           evt.aiNarrative = await callAI(prequelPrompt, 'event');
           const parsed = parseNarrativeAndState(evt.aiNarrative);
           evt.aiNarrative = parsed.narrative;
-          state.data.storyStateStale = true;
+          state.data.pendingSessionBreak = true;
         }
       } else {
         // 叙事Retry：与 sendEventWish 的原始生成逻辑一致
@@ -7187,8 +7214,8 @@ async function doRefreshNarrative(evtId, side) {
         // 清洗叙事文本（防止AI残留 |||STATE||| 等标记）
         const parsed = parseNarrativeAndState(evt.aiNarrative);
         evt.aiNarrative = parsed.narrative;
-        // 标记快照过期：下次文字聊天时重新提炼
-        state.data.storyStateStale = true;
+        // 剧情推进：挂起会话分隔信号（下次聊天开新会话边界；新快照仅在保存关键事件时生成）
+        state.data.pendingSessionBreak = true;
       }
     } else {
       // 润色Retry：基于玩家投递的叙事愿望，从上一条未删除的文本之后自然衔接
@@ -7374,6 +7401,8 @@ function restoreCalendarPageActions() {
 function renderCalendarPageEventInput() {
   const actionsArea = document.getElementById('calendar-page-actions');
   if (!actionsArea) return;
+  // 重渲染前捕获输入草稿
+  captureEventInputDraft();
   // 只读模式：已推进的事件不再投递愿望，不显示输入栏
   if (state.eventState === 'readonly') {
     actionsArea.classList.remove('input-bar');
@@ -7384,9 +7413,10 @@ function renderCalendarPageEventInput() {
     const placeholder = state.eventState === 'active' ? '继续投递剧情愿望...' : '写下你的剧情愿望...';
     actionsArea.classList.add('input-bar');
     actionsArea.innerHTML = `
-      <textarea id="event-input" rows="1" placeholder="${placeholder}" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
+      <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
       <button onmousedown="event.preventDefault()" onclick="sendCalendarEventWish()">投递</button>
     `;
+    restoreEventInputDraft();
   } else {
     actionsArea.classList.remove('input-bar');
     actionsArea.innerHTML = '';
@@ -7668,6 +7698,10 @@ async function saveCalendarKeyEvent() {
   try {
     // 合并调用：1次API同时生成事件总结 + 状态快照C
     const { summary, snapshot } = await generateSummaryAndSnapshot(calEvt, chainEvents);
+    // 生成失败或总结为空时不落盘（不写入空总结记录，快照保持旧值）
+    if (!summary || !summary.trim()) {
+      throw new Error('事件总结为空');
+    }
 
     // 将总结作为事件总结存入事件链
     state.data.eventHistory.push({
@@ -7686,15 +7720,25 @@ async function saveCalendarKeyEvent() {
       calEvt.advanced = true;
       calEvt.summary = summary;
     }
-    // 标记新会话边界（聊天时仅开新会话，不生成快照）
-    state.data.storyStateStale = true;
+    // 标记新会话边界（下次聊天画时间戳分隔线；聊天本身不生成新快照）
+    state.data.pendingSessionBreak = true;
     // 共用备份当前快照（在覆盖前捕获）：本月首次保存关键事件时记录一次，之后不覆盖
     // 刷新晨报/日历时，若被刷新的线本月有已保存事件，则回退到此备份
     if (!state.data.storyStateBeforeMonthEvents) {
       state.data.storyStateBeforeMonthEvents = state.data.storyState || '';
     }
     // 应用合并调用返回的快照B
-    if (snapshot) { state.data.storyState = snapshot; }
+    if (snapshot) {
+      state.data.storyState = snapshot;
+      // 记录快照来源元信息（生成月份/事件/时间），便于排查快照失真问题
+      state.data.storyStateMeta = {
+        month: state.data.calendarMonth || '',
+        eventTitle: calEvt.title || state.activeCalendarEvent,
+        generatedAt: Date.now(),
+        note: ''
+      };
+      console.log('[快照] 已更新 | 事件:%s | 月:%s | 快照:%d字', calEvt.title, state.data.calendarMonth, snapshot.length);
+    }
 
     // 将总结添加到记忆卡片
     state.data.calendarTimelineCards.push({
@@ -7717,7 +7761,8 @@ async function saveCalendarKeyEvent() {
     console.error('事件总结生成失败:', err);
     state.isLoading = false;
     state.calendarLoading = false;
-    state.eventState = 'idle';
+    // 失败时保留事件视图：已投递愿望回到 active（可继续投递），仅有前置铺垫回到 idle
+    state.eventState = chainEvents.some(e => !e.isPrequel && !e.isSummary) ? 'active' : 'idle';
     renderActiveEventView();
     showToast('总结生成失败，请重试');
   }
@@ -7809,11 +7854,13 @@ async function doAdvanceToNextMonth() {
       });
     }
 
-    // 2. 设置新月份
+    // 2. 设置新月份（上月窗口起点=刚结束月的起点，晨报/日历生成时据此取上月全部对话）
     const nextMonth = incrementGameMonth(currentMonth);
     const oldMonth = state.data.calendarMonth;
     const oldStartedAt = state.data.calendarMonthStartedAt;
+    const oldPrevStartedAt = state.data.calendarPrevMonthStartedAt || 0;
     state.data.calendarMonth = nextMonth;
+    state.data.calendarPrevMonthStartedAt = oldStartedAt;
     state.data.calendarMonthStartedAt = Date.now();
 
     // 3. 生成新月份晨报（使用上月快照A + 归档上下文，失败不中断）
@@ -7827,7 +7874,7 @@ async function doAdvanceToNextMonth() {
     // 4. 生成新月份时间轴事件（使用上月快照A + 归档上下文）
     let events = [];
     try {
-      const eventsCtx = buildMonthlyContextForCalendar();
+      const eventsCtx = buildPrevMonthChatContext();
       const eventsRaw = await callAI(`请生成${nextMonth}的时间轴事件。所有日期须使用"${nextMonth}"中的年份和月份，格式为"第X年X月X日"。${eventsCtx}`, 'calendarEvents');
       const lines = eventsRaw.trim().split('\n').filter(l => l.trim());
       lines.forEach((line, i) => {
@@ -7847,6 +7894,7 @@ async function doAdvanceToNextMonth() {
       console.error('[至下一月] 时间轴事件生成失败，回滚月份:', e);
       state.data.calendarMonth = oldMonth;
       state.data.calendarMonthStartedAt = oldStartedAt;
+      state.data.calendarPrevMonthStartedAt = oldPrevStartedAt;
       saveToStorage();
       showToast('时间轴事件生成失败，已恢复，请重试');
       return;
@@ -7860,8 +7908,8 @@ async function doAdvanceToNextMonth() {
     // 新月份重置共用快照备份（本月归档内容视作已发生，不回退；新月首次保存时重新备份）
     state.data.storyStateBeforeMonthEvents = '';
 
-    // 注：不在此处生成快照，快照仅在关键剧情完成时生成
-    state.data.storyStateStale = true;
+    // 注：不在此处生成快照（快照仅在保存关键事件时生成）；过月剧情有新进展，挂起会话分隔信号
+    state.data.pendingSessionBreak = true;
 
     saveToStorage();
     showToast('已推进至' + nextMonth);
@@ -7909,7 +7957,7 @@ async function refreshCalendarEvents() {
   const currentMonth = state.data.calendarMonth || '第1年1月';
 
   try {
-    const eventsCtx = buildMonthlyContextForCalendar();
+    const eventsCtx = buildPrevMonthChatContext();
     const eventsRaw = await callAI(`请生成${currentMonth}的时间轴事件。所有日期须使用"${currentMonth}"中的年份和月份，格式为"第X年X月X日"。${eventsCtx}`, 'calendarEvents');
     const lines = eventsRaw.trim().split('\n').filter(l => l.trim());
     const events = [];
@@ -7943,8 +7991,10 @@ async function refreshCalendarEvents() {
     // 日历线有已保存的关键事件 → 回退快照到共用备份（本月首次保存前），并清空备份；否则快照不动
     if (hadCalendarSaves && state.data.storyStateBeforeMonthEvents) {
       state.data.storyState = state.data.storyStateBeforeMonthEvents;
-      state.data.storyStateStale = false;
+      state.data.pendingSessionBreak = false;
       state.data.storyStateBeforeMonthEvents = '';
+      // 记录回退后的快照元信息
+      state.data.storyStateMeta = { month: state.data.calendarMonth || '', eventTitle: '', generatedAt: Date.now(), note: '已回退（刷新日历撤销本月已保存事件）' };
     }
     saveToStorage();
     showToast('时间轴事件已刷新');
@@ -8154,7 +8204,6 @@ function openMainStoryEditor() {
       </div>
       <div class="modal-footer">
         <button class="modal-btn" onclick="closeModal()">取消</button>
-        ${state.data.mainStory ? '<button class="modal-btn" style="color:var(--danger);" onclick="clearMainStory()">清空</button>' : ''}
         <button class="modal-btn primary" onclick="saveMainStory()">保存</button>
       </div>
     </div>
@@ -8174,14 +8223,6 @@ function saveMainStory() {
   closeModal();
   renderSettings();
   showToast('已保存');
-}
-
-function clearMainStory() {
-  state.data.mainStory = '';
-  saveToStorage();
-  closeModal();
-  renderSettings();
-  showToast('已清空');
 }
 
 /* ========== 人设编辑器 ========== */
