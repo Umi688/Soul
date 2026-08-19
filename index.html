@@ -2603,7 +2603,7 @@ const DEFAULT_DATA = {
   calendarNotifications: [],// NOTIFICATIONS/通知：3条突发事件 [string]
   calendarMenu: [],         // Daily Menu：3条餐食 [{type, food, source}]
   calendarSocial: [],       // Social Feedback/舆论：3-5条舆论 [string]
-  calendarConnections: [],  // Connections/羁绊：3条NPC关系进展 [{pair, text}]
+  calendarConnections: [],  // Connections/羁绊：最多3条NPC关系进展 [{pair, text}]
   calendarDailyNews: [],    // Daily News：3条新闻简报 [{title, body, comments:[{author,text}]}]
   storyState: '',  // 主线剧情状态快照（注入每个NPC的系统指令；由聊天首次发送提炼，关键剧情推进后过期）
   storyStateStale: false,  // 快照是否过期（true=需在下次文字聊天时重新提炼）
@@ -3857,13 +3857,24 @@ function buildModeInstruction(mode) {
   } else if (mode === 'calendarConnection') {
     const _cMe = (state.data.characters.me.name || '').trim() || '主控';
     const _cNpcs = (state.data.characters.npcs || []).filter(n => n.name);
-    const _cNpcListStr = _cNpcs.length ? _cNpcs.map(n => n.name).join('、') : '（无NPC）';
+    // 羁绊最多3个：特殊NPC < 3时全部显示，≥3时随机挑选3个
+    let _selectedNpcs = _cNpcs;
+    if (_cNpcs.length > 3) {
+      const _shuffled = [..._cNpcs];
+      for (let i = _shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [_shuffled[i], _shuffled[j]] = [_shuffled[j], _shuffled[i]];
+      }
+      _selectedNpcs = _shuffled.slice(0, 3);
+    }
+    const _cNpcCount = _selectedNpcs.length;
+    const _cNpcListStr = _cNpcCount ? _selectedNpcs.map(n => n.name).join('、') : '（无NPC）';
     let _cNpcProfiles = '';
-    _cNpcs.forEach(npc => {
+    _selectedNpcs.forEach(npc => {
       _cNpcProfiles += `\n  ·${npc.name}：身份${npc.identity || '未设定'}，性格${npc.personality || '未设定'}，背景${npc.background || '未设定'}`;
       if (npc.other) _cNpcProfiles += `，其他${npc.other}`;
     });
-    return '\n【当前模式：羁绊进展生成】\n人物分三类：①特殊NPC（SpecialNPC）：在以下列表中的角色，对剧情有重要推进作用：' + _cNpcListStr + '\n  特殊NPC人设：' + (_cNpcProfiles || '（无）') + '\n  ②NPC：不在列表、但在事件里出现过的角色。③路人：完全随机的路人甲，仅用于评论。\n规则：\n1. 生成3条特殊NPC（SpecialNPC）对主控角色"' + _cMe + '"的印象与关系进展。\n2. 每条格式严格为：NPC姓名|||印象与关系进展描述\n  - NPC姓名：此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _cNpcListStr + '\n  - 印象与关系进展描述：一段话，基于该特殊NPC的人设性格，描述其对主控的印象以及近期关系的变化、升温或转折\n3. 关系进展应体现主线事件对各特殊NPC与主控关系的具体影响。\n4. 紧扣人设和近期经历，描述应具体而非空泛。\n5. 每条占一行，条目之间不要空行。\n6. 只输出关系进展列表，不加任何说明。\n';
+    return '\n【当前模式：羁绊进展生成】\n人物分三类：①特殊NPC（SpecialNPC）：在以下列表中的角色，对剧情有重要推进作用：' + _cNpcListStr + '\n  特殊NPC人设：' + (_cNpcProfiles || '（无）') + '\n  ②NPC：不在列表、但在事件里出现过的角色。③路人：完全随机的路人甲，仅用于评论。\n规则：\n1. 为上述' + _cNpcCount + '个特殊NPC（SpecialNPC）各生成一条对主控角色"' + _cMe + '"的印象与关系进展，共' + _cNpcCount + '条。\n2. 每条格式严格为：NPC姓名|||印象与关系进展描述\n  - NPC姓名：此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _cNpcListStr + '\n  - 印象与关系进展描述：一段话，基于该特殊NPC的人设性格，描述其对主控的印象以及近期关系的变化、升温或转折\n3. 关系进展应体现主线事件对各特殊NPC与主控关系的具体影响。\n4. 紧扣人设和近期经历，描述应具体而非空泛。\n5. 每条占一行，条目之间不要空行。\n6. 只输出关系进展列表，不加任何说明。\n';
   } else if (mode === 'calendarDailyNews') {
     const _dMe = (state.data.characters.me.name || '').trim() || '主控';
     return '\n【当前模式：每日新闻生成】\n规则：\n1. 生成3条新闻简报，风格类似坊间小报的花边新闻。\n2. 新闻应围绕主控角色"' + _dMe + '"和NPC的日常，用夸张、八卦的笔触撰写，但内容基于近期真实经历。\n3. 每条新闻格式严格为：标题|||正文|||评论1作者:评论1内容|||评论2作者:评论2内容\n  - 标题：吸引眼球的新闻标题\n  - 正文：新闻简报，第三人称\n  - 评论：2条读者评论，模拟不同身份的人的发言，可以吐槽、调侃或感慨\n4. 至少一条新闻应与主线剧情事件相关。\n5. 每条新闻占一个区块，区块之间用 ~~~ 分隔。\n6. 只输出新闻内容，不加任何说明。\n';
@@ -5737,7 +5748,7 @@ function buildCalSocialHtml() {
 }
 
 function buildCalConnectionHtml() {
-  const items = state.data.calendarConnections || [];
+  const items = (state.data.calendarConnections || []).slice(0, 3);  // 最多显示3条羁绊
   // 渲染层去重：同一NPC只保留第一条（防止AI未遵守指令时重复）
   const _seenNpc = new Set();
   const deduped = items.filter(c => {
@@ -6274,7 +6285,7 @@ async function _generateCalendarContent(targetMonth) {
       return { author: p[0] || '', text: p[1] || '' };
     });
 
-    // 5. CONNECTION（带姓名纠错：姓氏相同但名字不同 → 视为笔误，自动纠正为真实NPC名）
+    // 5. CONNECTION（带姓名纠错：姓氏相同但名字不同 → 视为笔误，自动纠正为真实NPC名；最多保留3条）
     const _existingNpcNames = (state.data.characters.npcs || []).map(n => (n.name || '').trim()).filter(Boolean);
     state.data.calendarConnections = (parts[5] || '').trim().split('\n').filter(l => l.trim()).map(line => {
       const p = line.split('|||').map(s => s.trim());
@@ -6638,6 +6649,37 @@ async function generateEventPrequel(evt) {
     renderActiveEventView();
     showToast('前置剧情生成失败，请重试');
   }
+}
+
+// 从事件ID查找或构造日历事件对象（晨报事件不在 calendarEvents 中，需从备忘/通知构造）
+function getCalEventById(evtId) {
+  // 先从当月日历事件中查找
+  let calEvt = (state.data.calendarEvents || []).find(e => e.id === evtId);
+  if (calEvt) return calEvt;
+  // 晨报事件：从事件ID解析原始文本（morning_type_index_month 格式）
+  const parts = evtId && evtId.match(/^morning_(\w+)_(\d+)_(.+)$/);
+  if (!parts) return null;
+  const type = parts[1];
+  const idx = parseInt(parts[2]);
+  const month = parts[3];
+  let text = '';
+  // 优先从当月数据查找，其次从归档数据查找
+  if (type === 'memo') {
+    text = (state.data.calendarMemos || [])[idx] || '';
+    if (!text) {
+      const archive = (state.data.calendarArchives || []).find(a => a.month === month);
+      if (archive) text = (archive.memos || [])[idx] || '';
+    }
+  } else if (type === 'notif') {
+    text = (state.data.calendarNotifications || [])[idx] || '';
+    if (!text) {
+      const archive = (state.data.calendarArchives || []).find(a => a.month === month);
+      if (archive) text = (archive.notifications || [])[idx] || '';
+    }
+  }
+  if (!text) return null;
+  const title = text.length > 20 ? text.substring(0, 20) + '…' : text;
+  return { id: evtId, title, desc: text, date: month, isKey: true, advanced: false };
 }
 
 // 投递剧情愿望（复用愿望→润色→叙事系统）
@@ -7082,7 +7124,7 @@ async function doRefreshNarrative(evtId, side) {
     if (side === 'ai') {
       if (evt.isSummary) {
         // 事件总结Retry：重新生成总结
-        const calEvt = state.data.calendarEvents.find(e => e.id === evt.calendarEventId);
+        const calEvt = getCalEventById(evt.calendarEventId);
         if (calEvt) {
           const chainEvents = state.data.eventHistory.filter(e => e.calendarEventId === evt.calendarEventId && !e.isSummary && e.id !== evt.id);
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
@@ -7098,7 +7140,7 @@ async function doRefreshNarrative(evtId, side) {
         }
       } else if (evt.isPrequel) {
         // 前置剧情Retry：重新生成场景铺垫
-        const calEvt = state.data.calendarEvents.find(e => e.id === evt.calendarEventId);
+        const calEvt = getCalEventById(evt.calendarEventId);
         if (calEvt) {
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
           const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
