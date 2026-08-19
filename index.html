@@ -894,9 +894,9 @@ html:-webkit-full-screen #app{
 .narrative-block{
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:10px;
   flex-shrink:0;
-  margin-bottom:14px;
+  margin-bottom:10px;
 }
 .narr-card{
   background:rgba(239,244,250,0.9);
@@ -3109,6 +3109,11 @@ function scrollChatToBottom() {
 
 // 输入框自动撑高：根据内容调整高度，最高3行，并保持上方内容滚动到底部
 function autoResizeInput(el) {
+  // 空内容时直接重置为一行高度，避免残留多行
+  if (!el.value.trim()) {
+    el.style.height = 'auto';
+    return;
+  }
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 'px';
 }
