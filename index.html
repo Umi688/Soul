@@ -7849,14 +7849,8 @@ async function doAdvanceToNextMonth() {
     state.data.eventHistory = [];
     state.data.storyStateBeforeMorningEvents = '';
 
-    // 6. 生成新快照B（包含新月份的晨报+事件内容）
-    try {
-      const snapshot = await generateStoryStateSnapshot();
-      if (snapshot) { state.data.storyState = snapshot; state.data.storyStateStale = false; saveToStorage(); }
-    } catch(e) {
-      console.error('[至下一月] 快照B生成失败，使用旧快照:', e);
-      state.data.storyStateStale = true;
-    }
+    // 注：不在此处生成快照，快照仅在关键剧情完成时生成
+    state.data.storyStateStale = true;
 
     saveToStorage();
     showToast('已推进至' + nextMonth);
