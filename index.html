@@ -2606,9 +2606,9 @@ const DEFAULT_DATA = {
   calendarSocial: [],       // Social Feedback/舆论：3-5条舆论 [string]
   calendarConnections: [],  // Connections/羁绊：最多3条NPC关系进展 [{pair, text}]
   calendarDailyNews: [],    // Daily News：3条新闻简报 [{title, body, comments:[{author,text}]}]
-  storyState: '',  // 主线剧情状态快照（注入每个NPC的系统指令；由聊天首次发送提炼，关键剧情推进后过期）
-  storyStateStale: false,  // 快照是否过期（true=需在下次文字聊天时重新提炼）
-  storyStateBeforeMorningEvents: '',  // 晨报关键事件触发前的快照备份（刷新晨报时回退到此快照）
+  storyState: '',  // 主线剧情状态快照（注入每个NPC的系统指令；由关键剧情保存时提炼，注入聊天持续复用）
+  storyStateStale: false,  // 快照是否过期（true=下次聊天开新会话）
+  storyStateBeforeMonthEvents: '',  // 共用快照备份（单槽）：本月首次保存关键事件（晨报线或日历线）前的快照；刷新对应页且该线有已保存事件时回退
   mainStory: '',  // 主线剧情约束（用户在设定页手填，注入所有NPC的系统指令）
   apiConfig: {
     baseUrl: 'https://api.deepseek.com',
@@ -2821,7 +2821,15 @@ function normalizeNpcModel() {
   if (!Array.isArray(d.calendarDailyNews)) d.calendarDailyNews = [];
   if (!Array.isArray(d.groupChats)) d.groupChats = [];
   if (typeof d.activeGroupId !== 'string') d.activeGroupId = '';
-  if (typeof d.storyStateBeforeMorningEvents !== 'string') d.storyStateBeforeMorningEvents = '';
+  // 共用快照备份字段初始化 + 历史版本迁移（分线字段合并为单槽）
+  if (typeof d.storyStateBeforeMonthEvents !== 'string') d.storyStateBeforeMonthEvents = '';
+  if (typeof d.storyStateBeforeMorningEvents === 'string' || typeof d.storyStateBeforeCalendarEvents === 'string') {
+    if (!d.storyStateBeforeMonthEvents) {
+      d.storyStateBeforeMonthEvents = d.storyStateBeforeMorningEvents || d.storyStateBeforeCalendarEvents || '';
+    }
+    delete d.storyStateBeforeMorningEvents;
+    delete d.storyStateBeforeCalendarEvents;
+  }
 
   // 校正 activeNpcId：指向不存在的 NPC 时回退到第一个
   if (!d.activeNpcId || !d.characters.npcs.some(n => n.id === d.activeNpcId)) {
@@ -6366,25 +6374,29 @@ async function generateCalendarAll(targetMonth) {
   if (container) container.innerHTML = `<div class="calendar-loading" style="padding:60px 0;">生成晨报内容中<span class="dots"><span></span><span></span><span></span></span></div>`;
 
   try {
-    // 刷新晨报前：清零当月已触发的晨报关键事件链 + 回退快照
+    // 刷新晨报前：仅清零晨报线关键事件内容（日历线数据保留）
+    // 若晨报线本月有已保存的关键事件，快照回退到共用备份；否则快照不动
     const hadMorningChains = state.data.eventHistory.some(
       e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')
     );
+    const hadMorningSaves = state.data.eventHistory.some(
+      e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_') && e.isSummary
+    );
     if (hadMorningChains) {
-      // 1. 从 eventHistory 中移除所有晨报事件链记录
+      // 1. 从 eventHistory 中仅移除晨报事件链记录（日历事件链保留）
       state.data.eventHistory = state.data.eventHistory.filter(
         e => !(typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_'))
       );
-      // 2. 从记忆卡片中移除晨报事件总结
+      // 2. 仅移除晨报事件总结卡片（日历关键事件总结卡片保留）
       state.data.calendarTimelineCards = (state.data.calendarTimelineCards || []).filter(
         c => !c.isMorningSummary
       );
-      // 3. 回退快照到晨报事件链触发前的状态
-      if (state.data.storyStateBeforeMorningEvents) {
-        state.data.storyState = state.data.storyStateBeforeMorningEvents;
+      // 3. 晨报线有已保存的关键事件 → 回退快照到共用备份（本月首次保存前），并清空备份
+      if (hadMorningSaves && state.data.storyStateBeforeMonthEvents) {
+        state.data.storyState = state.data.storyStateBeforeMonthEvents;
+        state.data.storyStateStale = false;
+        state.data.storyStateBeforeMonthEvents = '';
       }
-      state.data.storyStateStale = false;
-      state.data.storyStateBeforeMorningEvents = '';
       saveToStorage();
     }
 
@@ -6474,15 +6486,8 @@ async function doOpenStoryEventFromMorning(type, index) {
   const _calContainer = document.getElementById('calendar-content');
   if (_calContainer) state._preEventScrollTop = _calContainer.scrollTop;
 
-  // 在首次触发晨报事件链前，备份当前快照（刷新晨报时回退到此快照）
-  // 仅当还没有备份时才备份（避免多次触发不同事件链覆盖最早的备份）
-  const hasAnyMorningChain = state.data.eventHistory.some(
-    e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')
-  );
-  if (!hasAnyMorningChain && !state.data.storyStateBeforeMorningEvents) {
-    state.data.storyStateBeforeMorningEvents = state.data.storyState || '';
-    saveToStorage();
-  }
+  // 注：快照备份已统一移至保存关键剧情时（见保存流程），
+  // 本月首次保存前自动备份，刷新晨报/日历时回退，不再需要在触发晨报链时备份
 
   updateActiveEventHeaderButtons();
 
@@ -7683,7 +7688,12 @@ async function saveCalendarKeyEvent() {
     }
     // 标记新会话边界（聊天时仅开新会话，不生成快照）
     state.data.storyStateStale = true;
-    // 应用合并调用返回的快照C
+    // 共用备份当前快照（在覆盖前捕获）：本月首次保存关键事件时记录一次，之后不覆盖
+    // 刷新晨报/日历时，若被刷新的线本月有已保存事件，则回退到此备份
+    if (!state.data.storyStateBeforeMonthEvents) {
+      state.data.storyStateBeforeMonthEvents = state.data.storyState || '';
+    }
+    // 应用合并调用返回的快照B
     if (snapshot) { state.data.storyState = snapshot; }
 
     // 将总结添加到记忆卡片
@@ -7847,7 +7857,8 @@ async function doAdvanceToNextMonth() {
     state.data.calendarMonthReport = '';
     state.data.calendarTimelineCards = [];
     state.data.eventHistory = [];
-    state.data.storyStateBeforeMorningEvents = '';
+    // 新月份重置共用快照备份（本月归档内容视作已发生，不回退；新月首次保存时重新备份）
+    state.data.storyStateBeforeMonthEvents = '';
 
     // 注：不在此处生成快照，快照仅在关键剧情完成时生成
     state.data.storyStateStale = true;
@@ -7921,11 +7932,20 @@ async function refreshCalendarEvents() {
       return;
     }
 
-    // 全部清空（同过月逻辑）：替换事件 + 清空记忆卡片 + 清空事件链
-    state.data.calendarEvents = events;
-    state.data.calendarTimelineCards = [];
-    state.data.eventHistory = [];
-    state.data.storyStateBeforeMorningEvents = '';
+    // 记录日历线本月是否有已保存的关键事件（须在替换事件前检测，新事件对象不含 advanced）
+    const hadCalendarSaves = (state.data.calendarEvents || []).some(e => e.advanced);
+    // 替换事件 + 仅清零日历线内容（晨报事件链与晨报总结卡片保留）
+    state.data.calendarEvents = events;  // 全新事件对象，advanced/summary 自然重置
+    state.data.calendarTimelineCards = (state.data.calendarTimelineCards || []).filter(c => c.isMorningSummary);
+    state.data.eventHistory = state.data.eventHistory.filter(
+      e => typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')
+    );
+    // 日历线有已保存的关键事件 → 回退快照到共用备份（本月首次保存前），并清空备份；否则快照不动
+    if (hadCalendarSaves && state.data.storyStateBeforeMonthEvents) {
+      state.data.storyState = state.data.storyStateBeforeMonthEvents;
+      state.data.storyStateStale = false;
+      state.data.storyStateBeforeMonthEvents = '';
+    }
     saveToStorage();
     showToast('时间轴事件已刷新');
   } catch(e) {
