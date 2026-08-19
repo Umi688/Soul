@@ -896,6 +896,7 @@ html:-webkit-full-screen #app{
   flex-direction:column;
   gap:12px;
   flex-shrink:0;
+  margin-bottom:14px;
 }
 .narr-card{
   background:rgba(239,244,250,0.9);
@@ -6111,7 +6112,12 @@ function appendCalendarEvent(evtId) {
   } else {
     container.insertAdjacentHTML('beforeend', eventHtml);
   }
-  container.scrollTop = container.scrollHeight;
+  // 确保DOM渲染完成后再滚动到底部
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  });
 }
 
 // Update only the bottom state UI without rebuilding event blocks
@@ -6124,7 +6130,13 @@ function updateCalendarStateUI() {
     if (container) container.insertAdjacentHTML('beforeend', `<div id="calendar-state-ui">${buildCalendarStateHtml()}</div>`);
   }
   const container = document.getElementById('calendar-page-cards') || document.getElementById('calendar-content');
-  if (container) container.scrollTop = container.scrollHeight;
+  if (container) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    });
+  }
 }
 
 // 判断当前是否在晨报事件视图
@@ -7401,8 +7413,8 @@ function updateCalendarPageHeaderButtons() {
     }
   }
 
-  if (refreshBtn) refreshBtn.style.display = (inEvent || inArchive) ? 'none' : '';
-  if (archiveBtn) archiveBtn.style.display = (inEvent || inArchive) ? 'none' : '';
+  if (refreshBtn) refreshBtn.style.display = (inEvent || state.viewingCalendarTimelineArchiveMonth) ? 'none' : '';
+  if (archiveBtn) archiveBtn.style.display = (inEvent || state.viewingCalendarTimelineArchiveMonth) ? 'none' : '';
   // 跳转按钮：仅在看历史月份且不在事件视图时显示
   if (jumpBtn) jumpBtn.style.display = (state.viewingCalendarTimelineArchiveMonth && !inEvent) ? '' : 'none';
   if (saveBtn) {
