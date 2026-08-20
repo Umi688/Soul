@@ -1009,15 +1009,19 @@ html:-webkit-full-screen #app{
   padding-left:14px;
   background:rgba(232,238,246,0.5);
 }
-/* 过往记忆卡片 */
+/* 过往记忆卡片（新闻卡片同款：渐变底+左侧竖条，与下方时间轴区分） */
 .calendar-card-item{
+  background:linear-gradient(135deg,rgba(239,244,250,0.75) 0%,rgba(138,168,208,0.5) 100%);
+  border-left:3px solid rgba(26,43,60,0.3);
   padding:14px 16px;
-  border-bottom:1px solid var(--border);
+  margin-bottom:10px;
 }
+.calendar-card-item:last-child{margin-bottom:0}
 .calendar-card-content{
-  font-size:13px;
-  color:var(--text-dim);
-  line-height:1.6;
+  font-size:12px;
+  line-height:1.8;
+  color:rgba(58,111,165,0.92);
+  word-break:break-word;
 }
 /* 过往记忆归档列表 */
 .calendar-page-archive-list{
@@ -1052,8 +1056,18 @@ html:-webkit-full-screen #app{
 }
 /* 归档月份查看视图 */
 .calendar-page-archive-section-title{
-  font-size:11px;
+  font-size:12px;
   color:var(--text-faint);
+  font-weight:600;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  padding:14px 16px 6px;
+}
+/* 记忆卡片板块标题（加粗深色，区别于时间轴标题） */
+.calendar-cards-section-title{
+  font-size:11px;
+  color:rgba(26,43,60,0.85);
+  font-weight:600;
   letter-spacing:2px;
   text-transform:uppercase;
   padding:14px 16px 6px;
@@ -1357,6 +1371,11 @@ html:-webkit-full-screen #app{
 }
 .calendar-event-date{font-size:11px;color:var(--text-faint)}
 .calendar-event.key .calendar-event-date{color:var(--gold)}
+.calendar-event.special .calendar-event-dot{
+  background:var(--gold);
+  box-shadow:0 0 0 3px rgba(239,244,250,0.9),0 0 6px rgba(212,175,55,0.4);
+}
+.calendar-event.special .calendar-event-date{color:var(--gold)}
 .calendar-event.clickable{
   cursor:pointer;
   transition:background 0.2s var(--ease);
@@ -1391,6 +1410,10 @@ html:-webkit-full-screen #app{
 .calendar-event-badge.done{
   color:var(--text-faint);
   background:rgba(138,168,208,0.08);
+}
+.calendar-event-badge.special{
+  color:var(--gold);
+  background:rgba(138,168,208,0.18);
 }
 
 /* ========== Calendar Page Tab ========== */
@@ -3897,7 +3920,25 @@ function buildModeInstruction(mode) {
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
-    return '\n【当前模式：时间轴事件生成】\n规则：\n1. 根据主线剧情、近期聊天记录和事件叙事，生成本月的时间轴事件，5-10条日常事件 + 1-3条关键剧情事件，共6-13条。\n2. 事件必须紧扣人设、近期经历和关系状态，不要写空泛的通用内容。\n3. 每条格式严格为：日期|||标题|||内容|||类型\n  - 日期：用"第X年X月X日"格式，年份和月份与用户给出的月份一致\n  - 内容\n  - 类型：日常事件填 normal，关键剧情填 key\n4. 关键剧情（key）应是推动主线发展的转折点。日常事件也应侧面映衬主线氛围，不要与主线脱节。\n5. 一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。\n6. 每条占一行，条目之间不要空行。\n7. 只输出事件列表，不加任何说明。\n';
+    const _specialNpcs = (state.data.characters.npcs || []).filter(n => n.name);
+    const _hasSpecial = _specialNpcs.length > 0;
+    const _specialNames = _specialNpcs.map(n => n.name).join('、');
+    const _rule1 = _hasSpecial
+      ? '生成本月的时间轴事件，4-7条生活切片 + 1-3条关键剧情事件 + 1-3条特殊NPC事件，共6-13条。'
+      : '生成本月的时间轴事件，4-10条生活切片 + 1-3条关键剧情事件，共6-13条。';
+    const _typeRule = _hasSpecial
+      ? '类型：生活切片填 normal，关键剧情填 key，特殊NPC事件填 special'
+      : '类型：生活切片填 normal，关键剧情填 key';
+    const _rule4 = _hasSpecial
+      ? '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）也应侧面映衬主线氛围，不要与主线脱节。特殊NPC事件（special）指特殊NPC本人遭遇或卷入的事件，主角是该特殊NPC而非主控，需结合其人设和近期经历，不要与主线脱节。'
+      : '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）也应侧面映衬主线氛围，不要与主线脱节。';
+    const _rule5 = _hasSpecial
+      ? '一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。特殊NPC事件（special）的主角只能是以下特殊NPC，必须使用其真实姓名（禁止编造、近似或变体姓名，禁止引入新角色）：' + _specialNames + '。'
+      : '一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。';
+    const _rule8 = _hasSpecial
+      ? '避免与近期已发生的事件雷同：不得重复用户消息"近期已生成的事件"列表中出现过的主题、场景和互动形式（如同样的聚餐、同样的聊天场景、同样的意外）。每条生活切片和特殊NPC事件应有新的场景、新的互动形式或新的情绪基调。'
+      : '避免与近期已发生的事件雷同：不得重复用户消息"近期已生成的事件"列表中出现过的主题、场景和互动形式（如同样的聚餐、同样的聊天场景、同样的意外）。每条生活切片应有新的场景、新的互动形式或新的情绪基调。';
+    return '\n【当前模式：时间轴事件生成】\n规则：\n1. 根据主线剧情、近期聊天记录和事件叙事，' + _rule1 + '\n2. 事件必须紧扣人设、近期经历和关系状态，不要写空泛的通用内容。\n3. 每条格式严格为：日期|||标题|||内容|||类型\n  - 日期：用"第X年X月X日"格式，年份和月份与用户给出的月份一致\n  - 内容\n  - ' + _typeRule + '\n4. ' + _rule4 + '\n5. ' + _rule5 + '\n6. 每条占一行，条目之间不要空行。\n7. 只输出事件列表，不加任何说明。\n8. ' + _rule8 + '\n';
   }
 
   return '';
@@ -3930,6 +3971,9 @@ function buildTimelineContextPrompt(scope) {
   const eventLine = (e) => {
     if (e.isKey) {
       return e.summary ? `【${e.date || ''}】${e.title}（关键）：${e.summary}` : '';
+    }
+    if (e.type === 'special') {
+      return `【${e.date || ''}】${e.title}（特殊NPC事件）：${e.desc || ''}`;
     }
     return `【${e.date || ''}】${e.title}：${e.desc || ''}`;
   };
@@ -4052,7 +4096,7 @@ async function callAI(userMessage, mode) {
   const config = state.data.apiConfig;
 
   if (!config.apiKey) {
-    return mockResponse(mode, userMessage);
+    throw new Error('未配置API密钥，请先在设置中填写');
   }
 
   const systemPrompt = buildSystemPrompt(mode);
@@ -4202,44 +4246,6 @@ async function fetchModelList(baseUrl, apiKey) {
   const data = await resp.json();
   if (!data.data || !Array.isArray(data.data)) throw new Error('模型列表格式异常');
   return data.data.map(m => m.id).filter(Boolean);
-}
-
-function mockResponse(mode, userMessage) {
-  if (mode === 'chat') {
-    // Check if this is a "should you continue?" prompt
-    if (userMessage && userMessage.includes('系统提示')) {
-      // ~55% chance the character says nothing more
-      if (Math.random() < 0.55) return '[END]';
-      const followUps = ['嗯。', '还有事吗？', '随你吧。', '别想太多。', '就这样吧。', '...没事了。'];
-      return followUps[Math.floor(Math.random() * followUps.length)];
-    }
-    const replies = [
-      '嗯，怎么了？', '好吧。', '你今天话挺多的。',
-      '...知道了。', '嗯。', '所以呢？', '行吧。', '说什么呢。'
-    ];
-    return replies[Math.floor(Math.random() * replies.length)];
-  } else if (mode === 'event' || mode === 'polish') {
-    return '夜色渐沉，城市的灯火在窗外次第亮起。他站在阳台上，目光漫无目的地掠过远处模糊的天际线。风从半开的窗缝里挤进来，带着初秋微凉的气息，吹动了他额前几缕碎发。走廊尽头传来若有若无的钢琴声，像是某个人在反复练习同一段旋律。';
-  } else if (mode === 'eventNarrative') {
-    return '两人因合租相识，初期关系生疏。近期对话中逐渐出现日常互动，氛围有所缓和。';
-  } else if (mode === 'calendarReport') {
-    return '本月的日子像一帧帧缓慢推移的胶片。月初两人尚在试探彼此的边界，言语间带着客气与保留。月中因一场意外的小冲突，关系反而有了微妙的松动——他开始会在深夜留一盏灯，她则偶尔多买一份早餐。月末，沉默不再令人不安，反而成了一种默契。';
-  } else if (mode === 'calendarEvents') {
-    return '8月2日|||深夜的灯|||他回来得很晚，厨房留了一盏灯，光晕暖黄。|||normal\n8月5日|||便利店的伞|||下雨天她顺手多买了一把伞，放在门口没说什么。|||normal\n8月9日|||阳台的对话|||两人难得同时站在阳台上，聊了几句无关紧要的话。|||normal\n8月12日|||摔碎的杯子|||她失手打碎了他常用的杯子，气氛一度僵硬。|||key\n8月15日|||加班的夜宵|||他加班到凌晨，回来发现桌上放了一碗还温热的面。|||normal\n8月18日|||旧照片|||搬家时翻出一张旧照片，两人一起看了很久。|||normal\n8月22日|||深夜的门铃|||深夜有人按门铃，两人一起屏息去开门。|||key\n8月25日|||超市的分歧|||在超市为买什么口味的牛奶产生了小分歧。|||normal\n8月28日|||雨天的等待|||她没带伞，在便利店门口等雨停，他突然出现了。|||normal';
-  } else if (mode === 'calendarMemo') {
-    return '记得周三交水电费\n冰箱里的牛奶快过期了\n下周要还书给图书馆\n阳台的绿植该浇水了';
-  } else if (mode === 'calendarNotification') {
-    return '快递柜有你的包裹，24小时内取走\n物业通知明天上午停水两小时\n楼下便利店正在搞满减活动';
-  } else if (mode === 'calendarMenu') {
-    return '早餐|||白粥配咸鸭蛋|||自己准备\n午餐|||番茄牛腩饭|||厉炘做的\n下午茶|||桂花糕|||巷口甜品店买的';
-  } else if (mode === 'calendarSocial') {
-    return '听说他最近经常加班到很晚，不知道在忙什么\n楼下王阿姨说那孩子搬进来以后安静多了\n便利店的小姑娘说他每次来都买同一种牛奶';
-  } else if (mode === 'calendarConnection') {
-    return '厉炘|||最近会主动留灯等他回来，话虽然不多但默契在慢慢积累。\n苏晚|||偶尔会在电梯里碰到，从点头之交开始有了简短的寒暄。\n陆远|||因为一次借东西的交集，开始有了不咸不淡的联系。';
-  } else if (mode === 'calendarDailyNews') {
-    return '巷尾深夜惊现神秘灯光，邻居猜测是闹鬼还是恋情？|||据本报记者实地探访，所谓"闹鬼"不过是合租屋里亮着的一盏夜灯。知情人士透露，这盏灯是室友特意为加班晚归者留下的。这则温暖的小细节，在邻里间引发了关于"现代合租关系"的热议。~~~评论1：住隔壁的老张：现在的年轻人，灯都不舍得关，电费不要钱啊？\n评论2：便利店店员小李：我觉得挺暖的，比那些冷冰冰的合租强多了。\n~~~超市牛奶断货案告破，嫌疑人竟是同一人？|||近日小区超市连续三天同款牛奶售罄，店员小王向本报透露，每次都是同一位年轻男子前来购买。"他每次来都买两盒，风雨无阻。"小王笑着补充，"我问他是不是很爱喝牛奶，他说不是自己喝的。"这番话引发了周围顾客会心的微笑。~~~评论1：水果摊刘姐：这哪里是买牛奶，这是在买心意啊！\n评论2：退休教师陈老师：年轻人有这份心，难得。\n~~~阳台钢琴声扰民？居民却集体请愿保留|||本周有居民投诉某栋公寓深夜钢琴声扰民，物业上门调查后发现，弹琴者是一位合租住户。令人意外的是，多位邻居联名请愿，表示这段钢琴声已成为他们入睡前的固定仪式。"就像每晚的安眠曲一样。"一位邻居如此形容。~~~评论1：夜班护士小周：确实好听，下班回来听到就觉得放松了。\n评论2：咖啡店老板阿杰：这年头还有人为扰民请愿保留的？这琴弹得确实有两下子。';
-  }
-  return '...';
 }
 
 /* ========== 聊天页 ========== */
@@ -5024,7 +5030,7 @@ async function sendGroupChatMessage() {
 async function callAIGroupChat(userMessage, grp, isAutoChat) {
   const config = state.data.apiConfig;
   if (!config.apiKey) {
-    return mockGroupResponse(grp);
+    throw new Error('未配置API密钥，请先在设置中填写');
   }
 
   const npcs = state.data.characters.npcs || [];
@@ -5186,16 +5192,6 @@ function showGroupTypingIndicator(grp) {
   `;
   container.insertAdjacentHTML('beforeend', typingHtml);
   container.scrollTop = container.scrollHeight;
-}
-
-// 模拟群聊回复（无API Key时）
-function mockGroupResponse(grp) {
-  const npcs = state.data.characters.npcs || [];
-  const members = grp.memberIds.map(id => npcs.find(n => n.id === id)).filter(Boolean);
-  if (!members.length) return '';
-  const responder = members[Math.floor(Math.random() * members.length)];
-  const replies = ['嗯。', '怎么了？', '知道了。', '行吧。', '...说的也是。', '哈哈。', '同意。', '真的吗？'];
-  return `${responder.name}|||${replies[Math.floor(Math.random() * replies.length)]}`;
 }
 
 // 返回列表时清除群聊状态
@@ -6440,6 +6436,26 @@ function buildPrevMonthChatContext() {
   return chatCtx ? `\n【上月聊天记录（NPC与群聊，供感知人物关系与近况）】\n${chatCtx}` : '';
 }
 
+// 归一化事件类型：容错AI输出的大小写及中文变体（如"关键剧情""特殊NPC事件"）
+function normEventType(raw) {
+  const t = (raw || '').toString().trim().toLowerCase();
+  if (t.includes('key') || t.includes('关键')) return 'key';
+  if (t.includes('special') || t.includes('特殊')) return 'special';
+  return 'normal';
+}
+
+// 近2月已生成的时间轴事件标题列表（查重清单，注入时间轴生成时的 user 消息）
+function buildRecentEventTitlesContext() {
+  const titles = [];
+  const archs = state.data.calendarTimelineArchives || [];
+  archs.slice(-2).forEach(a => {
+    (a.events || []).forEach(e => titles.push(`${a.month} ${e.title}`));
+  });
+  (state.data.calendarEvents || []).forEach(e => titles.push(`${state.data.calendarMonth || ''} ${e.title}`));
+  if (!titles.length) return '';
+  return `\n【近期已生成的事件（新事件不得与其雷同，须避开其主题、场景和互动形式）】\n${titles.map(t => '·' + t).join('\n')}`;
+}
+
 async function _generateCalendarContent(targetMonth) {
   const month = targetMonth || state.data.calendarMonth || '';
   const monthPrefix = month ? `当前是${month}。` : '';
@@ -6812,7 +6828,7 @@ async function generateEventPrequel(evt) {
   try {
     const _meName = (state.data.characters.me.name || '').trim() || '主控';
     const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-    const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${evt.title}\n事件简述：${evt.desc}\n事件日期：${evt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生前的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生前的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
+    const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${evt.title}\n事件简述：${evt.desc}\n事件日期：${evt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
     let narrative = await callAI(prequelPrompt, 'event');
     const parsed = parseNarrativeAndState(narrative);
     narrative = parsed.narrative;
@@ -6970,22 +6986,27 @@ function buildSnapshotContext() {
 
   recentArchives.forEach(arch => {
     const archKeyEvents = (arch.events || []).filter(e => e.isKey);
-    const archNormalEvents = (arch.events || []).filter(e => !e.isKey);
+    const archSpecialEvents = (arch.events || []).filter(e => !e.isKey && e.type === 'special');
+    const archNormalEvents = (arch.events || []).filter(e => !e.isKey && e.type !== 'special');
     // 旧事件只注入总结粒度，不注入叙事全文（总结已覆盖其信息，避免双份冗余）
     timelineContext += `\n【${arch.month} 日历事件概况】\n`;
     archKeyEvents.forEach(e => {
       timelineContext += `关键事件：${e.title} - ${e.desc}\n`;
       if (e.summary) timelineContext += `事件总结：${e.summary}\n`;
     });
+    archSpecialEvents.forEach(e => {
+      timelineContext += `特殊NPC事件：${e.title} - ${e.desc}\n`;
+    });
     archNormalEvents.forEach(e => {
-      timelineContext += `日常事件：${e.title} - ${e.desc}\n`;
+      timelineContext += `生活切片：${e.title} - ${e.desc}\n`;
     });
   });
 
   const currentMonth = state.data.calendarMonth || '当月';
   timelineContext += `\n【${currentMonth} 日历事件概况】\n`;
   const currentKeyEvents = (state.data.calendarEvents || []).filter(e => e.isKey);
-  const currentNormalEvents = (state.data.calendarEvents || []).filter(e => !e.isKey);
+  const currentSpecialEvents = (state.data.calendarEvents || []).filter(e => !e.isKey && e.type === 'special');
+  const currentNormalEvents = (state.data.calendarEvents || []).filter(e => !e.isKey && e.type !== 'special');
   // 排除当前正在保存的链：其全文已在任务一的【事件内容】注入，此处不重复
   const currentChains = (state.data.eventHistory || []).filter(
     e => !e.isSummary && !e.isPrequel && e.chainId !== state.currentChainId
@@ -7021,8 +7042,11 @@ function buildSnapshotContext() {
     timelineContext += `关键事件：${e.title} - ${e.desc}\n`;
     if (e.summary) timelineContext += `事件总结：${e.summary}\n`;
   });
+  currentSpecialEvents.forEach(e => {
+    timelineContext += `特殊NPC事件：${e.title} - ${e.desc}\n`;
+  });
   currentNormalEvents.forEach(e => {
-    timelineContext += `日常事件：${e.title} - ${e.desc}\n`;
+    timelineContext += `生活切片：${e.title} - ${e.desc}\n`;
   });
   currentChains.forEach(e => {
     if (e.aiNarrative) timelineContext += `叙事片段：${e.aiNarrative}\n`;
@@ -7086,7 +7110,7 @@ function buildSnapshotContext() {
 // 用于关键剧情保存时，同时生成事件摘要和故事状态快照
 async function generateSummaryAndSnapshot(calEvt, chainEvents) {
   const config = state.data.apiConfig;
-  if (!config.apiKey) { console.log('[合并生成] 无API Key，跳过'); return { summary: '', snapshot: '' }; }
+  if (!config.apiKey) { throw new Error('未配置API密钥，请先在设置中填写'); }
 
   const { _meName, _npcListStr, timelineContext, chatContext, calendarContext, mainStory } = buildSnapshotContext();
   const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -7427,12 +7451,13 @@ function renderCalendarPage() {
   let html = '<div class="calendar-timeline">';
   events.forEach(evt => {
     const keyClass = evt.isKey ? ' key' : '';
+    const specialClass = (!evt.isKey && evt.type === 'special') ? ' special' : '';
     const advancedClass = evt.advanced ? ' advanced' : '';
     const keyBadge = evt.isKey
       ? (evt.advanced
         ? '<span class="calendar-event-badge done">已推进</span>'
         : '<span class="calendar-event-badge">关键剧情</span>')
-      : '';
+      : (evt.type === 'special' ? '<span class="calendar-event-badge special">特殊NPC</span>' : '');
     // 关键剧情：整个卡片可点击进入（已推进的也可查看）
     const clickable = evt.isKey;
     const clickAttr = clickable ? ` onclick="openCalendarKeyEvent('${evt.id}')"` : '';
@@ -7457,7 +7482,7 @@ function renderCalendarPage() {
       ? `<div class="calendar-event-summary">${escapeHtml(summaryText)}</div>`
       : '';
     html += `
-      <div class="calendar-event${keyClass}${advancedClass}${clickableClass}"${clickAttr}>
+      <div class="calendar-event${keyClass}${specialClass}${advancedClass}${clickableClass}"${clickAttr}>
         <div class="calendar-event-dot"></div>
         <div class="calendar-event-body">
           <div class="calendar-event-date-row">
@@ -7661,7 +7686,7 @@ function renderCalendarPageArchivedTimeline(month) {
 
   // 显示该月的记忆卡片
   if (cards.length) {
-    html += '<div class="calendar-page-archive-section-title">记忆卡片</div>';
+    html += '<div class="calendar-cards-section-title">记忆卡片</div>';
     html += '<div class="calendar-page-archive-cards">';
     cards.forEach(card => {
       html += `<div class="calendar-card-item"><div class="calendar-card-content">${escapeHtml(card.content || '')}</div></div>`;
@@ -7675,12 +7700,13 @@ function renderCalendarPageArchivedTimeline(month) {
     html += '<div class="calendar-timeline">';
     events.forEach(evt => {
       const keyClass = evt.isKey ? ' key' : '';
+      const specialClass = (!evt.isKey && evt.type === 'special') ? ' special' : '';
       const advancedClass = evt.advanced ? ' advanced' : '';
       const keyBadge = evt.isKey
         ? (evt.advanced
           ? '<span class="calendar-event-badge done">已推进</span>'
           : '<span class="calendar-event-badge">关键剧情</span>')
-        : '';
+        : (evt.type === 'special' ? '<span class="calendar-event-badge special">特殊NPC</span>' : '');
       const clickable = evt.isKey;
       const clickAttr = clickable ? ` onclick="openCalendarKeyEvent('${evt.id}','${escapeHtml(month)}')"` : '';
       const clickableClass = clickable ? ' clickable' : '';
@@ -7688,7 +7714,7 @@ function renderCalendarPageArchivedTimeline(month) {
         ? `<div class="calendar-event-summary">${escapeHtml(evt.summary)}</div>`
         : '';
       html += `
-        <div class="calendar-event${keyClass}${advancedClass}${clickableClass}"${clickAttr}>
+        <div class="calendar-event${keyClass}${specialClass}${advancedClass}${clickableClass}"${clickAttr}>
           <div class="calendar-event-dot"></div>
           <div class="calendar-event-body">
             <div class="calendar-event-date-row">
@@ -7850,7 +7876,7 @@ async function saveCalendarKeyEvent() {
     // 失败时保留事件视图：已投递愿望回到 active（可继续投递），仅有前置铺垫回到 idle
     state.eventState = chainEvents.some(e => !e.isPrequel && !e.isSummary) ? 'active' : 'idle';
     renderActiveEventView();
-    showToast('总结生成失败，请重试');
+    showToast('总结生成失败：' + (err.message || '请重试'));
   }
 }
 
@@ -7960,18 +7986,20 @@ async function doAdvanceToNextMonth() {
     // 4. 生成新月份时间轴事件（使用上月快照A + 归档上下文）
     let events = [];
     try {
-      const eventsCtx = buildPrevMonthChatContext();
+      const eventsCtx = buildPrevMonthChatContext() + buildRecentEventTitlesContext();
       const eventsRaw = await callAI(`请生成${nextMonth}的时间轴事件。所有日期须使用"${nextMonth}"中的年份和月份，格式为"第X年X月X日"。${eventsCtx}`, 'calendarEvents');
       const lines = eventsRaw.trim().split('\n').filter(l => l.trim());
       lines.forEach((line, i) => {
         const parts = line.split('|||').map(s => s.trim());
         if (parts.length >= 3) {
+          const _t = normEventType(parts[3]);
           events.push({
             id: 'cal_' + Date.now() + '_' + i,
             date: parts[0],
             title: parts[1],
             desc: parts[2],
-            isKey: (parts[3] || '').toLowerCase() === 'key',
+            isKey: _t === 'key',
+            type: _t,
             advanced: false
           });
         }
@@ -8043,19 +8071,21 @@ async function refreshCalendarEvents() {
   const currentMonth = state.data.calendarMonth || '第1年1月';
 
   try {
-    const eventsCtx = buildPrevMonthChatContext();
+    const eventsCtx = buildPrevMonthChatContext() + buildRecentEventTitlesContext();
     const eventsRaw = await callAI(`请生成${currentMonth}的时间轴事件。所有日期须使用"${currentMonth}"中的年份和月份，格式为"第X年X月X日"。${eventsCtx}`, 'calendarEvents');
     const lines = eventsRaw.trim().split('\n').filter(l => l.trim());
     const events = [];
     lines.forEach((line, i) => {
       const parts = line.split('|||').map(s => s.trim());
       if (parts.length >= 3) {
+        const _t = normEventType(parts[3]);
         events.push({
           id: 'cal_' + Date.now() + '_' + i,
           date: parts[0],
           title: parts[1],
           desc: parts[2],
-          isKey: (parts[3] || '').toLowerCase() === 'key',
+          isKey: _t === 'key',
+          type: _t,
           advanced: false
         });
       }
