@@ -2644,8 +2644,9 @@ let state = {
   chatSessionId: 0,
   chatSessionStartTime: 0,  // 当前轮对话开始的时间戳（用于顶部时间戳显示）
   isLoading: false,
-  calendarLoading: false,  // 日历生成中标志（独立于isLoading，不影响聊天）
-  isTyping: false,  // 打字动画是否应显示（跨页面切换后恢复）
+  calendarLoading: false,  // 日历/事件生成中标志（事件线）
+  chatLoading: false,      // 聊天生成中标志（聊天线，独立于事件线：两条线可并发，互不清除对方的标志）
+  isTyping: false,  // 打字动画是否应显示（跨页面切换后恢复；仅聊天线设置，与事件生成无关）
   currentTab: 'chat',
   rulesExpanded: true,
   quoteContext: null,
@@ -2856,7 +2857,7 @@ function switchNpcChat(npcId) {
   // 如果当前在群聊，退出群聊模式
   if (d.activeGroupId) d.activeGroupId = '';
   if (npcId === d.activeNpcId && state.chatView !== 'group') { state.chatView = 'chat'; renderChat(); return; }
-  if (state.isLoading && !state.calendarLoading) { showToast('正在生成中，请稍后再切换'); return; }
+  if (state.chatLoading) { showToast('正在生成中，请稍后再切换'); return; }
   // 1. 当前聊天记录存入 npcChats（设定已在 npcs[] 中，无需同步）
   if (d.activeNpcId) d.npcChats[d.activeNpcId] = d.chatHistory;
   // 2. 切换
@@ -3258,6 +3259,9 @@ function resetRuntimeState() {
   state.currentChainId = null;
   state.quoteContext = null;
   state.isLoading = false;
+  state.calendarLoading = false;
+  state.chatLoading = false;
+  state.isTyping = false;
   state.rulesExpanded = true;
   state.chatSessionId++;
   state.chatSessionStartTime = 0;
@@ -3814,6 +3818,25 @@ function buildHistoryMessages(mode, isContinuation) {
   return [...cross, ...primary];
 }
 
+// 羁绊板块选人：星标NPC优先随机取3；不足3位时从未标记的特殊NPC里随机补足至3
+// 星标仅作用于羁绊模块，其余模块仍使用全部NPC列表
+function pickConnectionNpcs() {
+  const npcs = (state.data.characters.npcs || []).filter(n => n.name);
+  const starred = npcs.filter(n => n.starred);
+  const rest = npcs.filter(n => !n.starred);
+  const shuffle = arr => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const picked = shuffle(starred).slice(0, 3);
+  if (picked.length < 3) picked.push(...shuffle(rest).slice(0, 3 - picked.length));
+  return picked;
+}
+
 // L8 模式指令：根据 mode 动态注入
 function buildModeInstruction(mode) {
   if (mode === 'chat') {
@@ -3846,18 +3869,8 @@ function buildModeInstruction(mode) {
     return '\n【当前模式：舆论生成】\n规则：\n1. 生成3-5条舆论，围绕主控角色"' + _sMe + '"与各NPC的近况和社交评价。\n2. 舆论应模拟周围人、邻居、同事或社交圈的闲言碎语和看法。\n3. 每条舆论为一段话，约50-100字，带有主观色彩和八卦口吻。\n4. 至少一条舆论应涉及主线相关事件引发的社交反响。\n5. 紧扣人设和近期经历。\n6. 一律使用人物姓名指代，NPC用各自的姓名。\n7. 每条占一行，条目之间不要空行。\n8. 只输出舆论文本，不加编号、标题或说明。\n';
   } else if (mode === 'calendarConnection') {
     const _cMe = (state.data.characters.me.name || '').trim() || '主控';
-    // 羁绊池：仅星标NPC（星标仅作用于羁绊模块，其余逻辑不变）
-    const _cNpcs = (state.data.characters.npcs || []).filter(n => n.name && n.starred);
-    // 羁绊最多3个：星标NPC < 3时全部显示，≥3时随机挑选3个
-    let _selectedNpcs = _cNpcs;
-    if (_cNpcs.length > 3) {
-      const _shuffled = [..._cNpcs];
-      for (let i = _shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [_shuffled[i], _shuffled[j]] = [_shuffled[j], _shuffled[i]];
-      }
-      _selectedNpcs = _shuffled.slice(0, 3);
-    }
+    // 羁绊池：星标NPC优先；不足3位时从未标记的特殊NPC里随机补足（星标仅作用于羁绊模块）
+    const _selectedNpcs = pickConnectionNpcs();
     const _cNpcCount = _selectedNpcs.length;
     const _cNpcListStr = _cNpcCount ? _selectedNpcs.map(n => n.name).join('、') : '（无NPC）';
     let _cNpcProfiles = '';
@@ -3874,21 +3887,12 @@ function buildModeInstruction(mode) {
     const _npcs = (state.data.characters.npcs || []).filter(n => n.name);
     const _npcListStr = _npcs.length ? _npcs.map(n => n.name).join('、') : '（无NPC）';
     // 注：NPC完整人设已由 System Prompt L4 注入，此处仅保留姓名列表用于约束
-    // 羁绊板块专用池：从星标NPC中随机选3个（星标仅作用于羁绊板块，其余板块仍用全部NPC列表）
-    const _starNpcs = _npcs.filter(n => n.starred);
-    let _connNpcs = _starNpcs;
-    if (_starNpcs.length > 3) {
-      const _shuffled = [..._starNpcs];
-      for (let i = _shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [_shuffled[i], _shuffled[j]] = [_shuffled[j], _shuffled[i]];
-      }
-      _connNpcs = _shuffled.slice(0, 3);
-    }
-    const _connNpcListStr = _connNpcs.length ? _connNpcs.map(n => n.name).join('、') : '（无星标NPC）';
+    // 羁绊板块专用池：星标NPC随机3个；不足3位时从未标记的特殊NPC随机补足（星标仅作用于羁绊板块）
+    const _connNpcs = pickConnectionNpcs();
+    const _connNpcListStr = _connNpcs.length ? _connNpcs.map(n => n.name).join('、') : '（无特殊NPC）';
     const _connSection = _connNpcs.length
-      ? '（' + _connNpcs.length + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下星标NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _connNpcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）'
-      : '（本月无羁绊进展：当前没有标记的NPC。仅保留===CONNECTION===标记，标记后不输出任何条目，下一板块直接从===NEWS===开始）';
+      ? '（' + _connNpcs.length + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _connNpcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）'
+      : '（本月无羁绊进展：当前没有特殊NPC。仅保留===CONNECTION===标记，标记后不输出任何条目，下一板块直接从===NEWS===开始）';
     return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。围绕主控"' + _aMe + '"与主线剧情的故事事件和待处理意外，可涉及特殊NPC和NPC，至少1条关联主线）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。围绕主控与主线剧情的突发消息、意外状况或生活意外，可涉及特殊NPC和NPC，至少1条反映主线涟漪）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n' + _connSection + '\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
@@ -3997,6 +4001,24 @@ function buildTimelineContextPrompt(scope) {
   const morningCtx = morningBlocks.filter(Boolean).join('');
   if (morningCtx) {
     ctx += `\n【近月晨报（背景信息，自然感知即可，勿主动复述）】\n${morningCtx}`;
+  }
+
+  // 4. 更早月份：只注入记忆卡片（晨报线+日历线全部关键事件总结卡；旧归档无cards时回退到事件总结与事件链总结记录）
+  // 仅日历/晨报生成注入：对话窗口近3月已带全文细节，更远的历史只需保留总结级记忆
+  if (isCalendar && tlArchives.length > months) {
+    const oldBlocks = [];
+    tlArchives.slice(0, -months).forEach(arch => {
+      const cards = [];
+      ((arch.cards) || []).forEach(c => { if (c && c.content) cards.push(c.content.trim()); });
+      if (!cards.length) {
+        (arch.events || []).forEach(e => { if (e.isKey && e.summary) cards.push(e.summary.trim()); });
+        (arch.eventHistory || []).forEach(e => { if (e.isSummary && e.aiNarrative) cards.push(e.aiNarrative.trim()); });
+      }
+      if (cards.length) oldBlocks.push(`◆ ${arch.month}\n${cards.map(c => '·' + c).join('\n')}\n`);
+    });
+    if (oldBlocks.length) {
+      ctx += `\n【更早记忆卡片（3个月以前的关键事件总结）】\n${oldBlocks.join('')}`;
+    }
   }
 
   return ctx;
@@ -4329,8 +4351,9 @@ function renderChat() {
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 
-  // 恢复打字动画（跨页面切换后 DOM 被重建）
-  if (state.isTyping && !state.calendarLoading) showTypingIndicator();
+  // 恢复打字动画（跨页面切换后 DOM 被重建）；isTyping 仅由聊天线设置，
+  // 事件生成中并发聊天时动画同样需要恢复，不受 calendarLoading 影响
+  if (state.isTyping) showTypingIndicator();
 }
 
 // 窗口化渲染：自动加载更早的聊天消息（滑到顶部触发，增量前插，保持滚动位置）
@@ -4676,7 +4699,7 @@ function confirmDeleteGroup(groupId) {
 function switchToGroupChat(groupId) {
   const grp = state.data.groupChats.find(g => g.id === groupId);
   if (!grp) return;
-  if (state.isLoading && !state.calendarLoading) { showToast('正在生成中，请稍后再切换'); return; }
+  if (state.chatLoading) { showToast('正在生成中，请稍后再切换'); return; }
 
   // 如果当前在NPC对话中，保存当前聊天记录
   if (state.chatView === 'chat' && state.data.activeNpcId) {
@@ -4767,8 +4790,8 @@ function renderGroupChatView() {
   container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 
-  // 恢复打字动画（跨页面切换后 DOM 被重建）
-  if (state.isTyping && !state.calendarLoading) {
+  // 恢复打字动画（跨页面切换后 DOM 被重建）；事件生成中并发聊天时同样恢复
+  if (state.isTyping) {
     const grp2 = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
     if (grp2) showGroupTypingIndicator(grp2);
   }
@@ -4879,8 +4902,8 @@ function buildGroupMessageHtml(msg, idx, npcs, grp) {
 async function sendGroupChatMessage() {
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('chat-send-btn');
-  // 日历生成中允许聊天
-  if (state.isLoading && !state.calendarLoading) return;
+  // 聊天线独立守卫：聊天生成中拦截；事件生成中（calendarLoading）允许并发聊天
+  if (state.chatLoading) return;
   const text = input.value.trim();
 
   const grp = state.data.groupChats.find(g => g.id === state.data.activeGroupId);
@@ -4892,6 +4915,7 @@ async function sendGroupChatMessage() {
   // 空回复：让群成员自己根据上下文聊天互动（不添加用户消息）
   if (!text) {
     state.isLoading = true;
+    state.chatLoading = true;
     btn.disabled = true;
     showGroupTypingIndicator(grp);
     try {
@@ -4929,7 +4953,9 @@ async function sendGroupChatMessage() {
       removeTypingIndicator();
       showToast('群聊回复失败：' + (e.message || '未知错误'));
     } finally {
-      state.isLoading = false;
+      state.chatLoading = false;
+      // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
+      state.isLoading = state.calendarLoading;
       btn.disabled = false;
       input.focus();
     }
@@ -4954,6 +4980,7 @@ async function sendGroupChatMessage() {
   appendGroupChatMessage(grp.chatHistory.length - 1, grp);
 
   state.isLoading = true;
+  state.chatLoading = true;
   btn.disabled = true;
   showGroupTypingIndicator(grp);
 
@@ -4985,7 +5012,9 @@ async function sendGroupChatMessage() {
     removeTypingIndicator();
     showToast('AI回复失败：' + (e.message || '未知错误'));
   } finally {
-    state.isLoading = false;
+    state.chatLoading = false;
+    // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
+    state.isLoading = state.calendarLoading;
     btn.disabled = false;
     input.focus();
   }
@@ -5253,8 +5282,8 @@ async function sendChatMessage() {
   }
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('chat-send-btn');
-  // 日历生成中允许聊天（calendarLoading=true时跳过拦截）
-  if (state.isLoading && !state.calendarLoading) return;
+  // 聊天线独立守卫：聊天生成中拦截；事件生成中（calendarLoading）允许并发聊天
+  if (state.chatLoading) return;
   const text = input.value.trim();
   const hasQuote = !!state.quoteContext;
 
@@ -5272,6 +5301,7 @@ async function sendChatMessage() {
     const chatHist = state.data.chatHistory;
     const lastIsUser = chatHist.length > 0 && chatHist[chatHist.length - 1].role === 'user';
     state.isLoading = true;
+    state.chatLoading = true;
     btn.disabled = true;
     showTypingIndicator();
     try {
@@ -5305,7 +5335,9 @@ async function sendChatMessage() {
       removeTypingIndicator();
       showToast('AI回复失败：' + (e.message || '未知错误'));
     } finally {
-      state.isLoading = false;
+      state.chatLoading = false;
+      // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
+      state.isLoading = state.calendarLoading;
       btn.disabled = false;
       input.focus();
     }
@@ -5330,6 +5362,7 @@ async function sendChatMessage() {
   appendChatMessage(state.data.chatHistory.length - 1);
 
   state.isLoading = true;
+  state.chatLoading = true;
   btn.disabled = true;
 
   try {
@@ -5356,7 +5389,9 @@ async function sendChatMessage() {
     appendChatMessage(state.data.chatHistory.length - 1);
     saveToStorage();
   } finally {
-    state.isLoading = false;
+    state.chatLoading = false;
+    // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
+    state.isLoading = state.calendarLoading;
     btn.disabled = false;
     input.focus();
   }
@@ -5432,6 +5467,8 @@ function deleteMessage(idx) {
 async function regenerateMessage(idx) {
   const msg = state.data.chatHistory[idx];
   if (!msg || msg.role !== 'assistant') return;
+  // 聊天生成中禁止重生成（并发会产生重复的打字动画与乱序消息）
+  if (state.chatLoading) return;
   closeMsgActions();
 
   // 找到这条AI回复对应的上一条用户消息
@@ -5458,6 +5495,7 @@ async function regenerateMessage(idx) {
   const input = document.getElementById('chat-input');
   const btn = document.getElementById('chat-send-btn');
   state.isLoading = true;
+  state.chatLoading = true;
   btn.disabled = true;
   showTypingIndicator();
 
@@ -5484,7 +5522,9 @@ async function regenerateMessage(idx) {
     removeTypingIndicator();
     showToast('重新生成失败：' + (e.message || '未知错误'));
   } finally {
-    state.isLoading = false;
+    state.chatLoading = false;
+    // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
+    state.isLoading = state.calendarLoading;
     btn.disabled = false;
     input.focus();
   }
@@ -6267,7 +6307,11 @@ function restoreEventInputDraft() {
   const draft = state._eventInputDraft;
   if (draft && draft.eventId === el.dataset.eventId && draft.text) {
     el.value = draft.text;
-    autoResizeInput(el);
+    // switchTab 先渲染再切换可见性：渲染此刻目标页仍是 display:none，
+    // scrollHeight 在隐藏状态下测不准（多行塌成一行），延迟一帧到可见后再撑高
+    requestAnimationFrame(() => {
+      if (el.isConnected) autoResizeInput(el);
+    });
   }
 }
 
@@ -6927,7 +6971,7 @@ function buildSnapshotContext() {
   recentArchives.forEach(arch => {
     const archKeyEvents = (arch.events || []).filter(e => e.isKey);
     const archNormalEvents = (arch.events || []).filter(e => !e.isKey);
-    const archChains = (arch.eventHistory || []).filter(e => !e.isSummary && !e.isPrequel);
+    // 旧事件只注入总结粒度，不注入叙事全文（总结已覆盖其信息，避免双份冗余）
     timelineContext += `\n【${arch.month} 日历事件概况】\n`;
     archKeyEvents.forEach(e => {
       timelineContext += `关键事件：${e.title} - ${e.desc}\n`;
@@ -6936,16 +6980,16 @@ function buildSnapshotContext() {
     archNormalEvents.forEach(e => {
       timelineContext += `日常事件：${e.title} - ${e.desc}\n`;
     });
-    archChains.forEach(e => {
-      if (e.aiNarrative) timelineContext += `叙事片段：${e.aiNarrative}\n`;
-    });
   });
 
   const currentMonth = state.data.calendarMonth || '当月';
   timelineContext += `\n【${currentMonth} 日历事件概况】\n`;
   const currentKeyEvents = (state.data.calendarEvents || []).filter(e => e.isKey);
   const currentNormalEvents = (state.data.calendarEvents || []).filter(e => !e.isKey);
-  const currentChains = (state.data.eventHistory || []).filter(e => !e.isSummary && !e.isPrequel);
+  // 排除当前正在保存的链：其全文已在任务一的【事件内容】注入，此处不重复
+  const currentChains = (state.data.eventHistory || []).filter(
+    e => !e.isSummary && !e.isPrequel && e.chainId !== state.currentChainId
+  );
 
   // 晨报关键事件：不在 calendarEvents 中，但从 eventHistory 中提取已保存的事件链
   const morningChainIds = [...new Set(
@@ -7009,14 +7053,15 @@ function buildSnapshotContext() {
     chatContext = '（聊天记录过长，仅保留最近部分）\n' + cleanSlice;
   }
 
-  // 3. 晨报内容
+  // 3. 晨报内容（注：monthReport 为历史遗留空字段，从不产出内容，不注入）
   let calendarContext = '';
-  if (state.data.calendarMonthReport && state.data.calendarMonthReport.trim()) {
-    calendarContext += `【当月晨报】\n${state.data.calendarMonthReport}\n`;
-  }
   if (state.data.calendarMemos && state.data.calendarMemos.length) {
     calendarContext += '当月备忘录：\n';
     state.data.calendarMemos.forEach(m => { calendarContext += `- ${m}\n`; });
+  }
+  if (state.data.calendarNotifications && state.data.calendarNotifications.length) {
+    calendarContext += '当月通知：\n';
+    state.data.calendarNotifications.forEach(n => { calendarContext += `- ${n}\n`; });
   }
   if (state.data.calendarConnections && state.data.calendarConnections.length) {
     calendarContext += '当月羁绊进展：\n';
@@ -7025,9 +7070,10 @@ function buildSnapshotContext() {
   const calArchives = state.data.calendarArchives || [];
   const recentCalArchives = calArchives.slice(-2);
   recentCalArchives.forEach(arch => {
-    if (arch.monthReport && arch.monthReport.trim()) {
-      calendarContext += `\n【${arch.month} 晨报】\n${arch.monthReport}\n`;
-    }
+    const secLines = [];
+    if (arch.memos && arch.memos.length) secLines.push(`备忘录：${arch.memos.filter(Boolean).join('；')}`);
+    if (arch.notifications && arch.notifications.length) secLines.push(`通知：${arch.notifications.filter(Boolean).join('；')}`);
+    if (secLines.length) calendarContext += `\n【${arch.month} 晨报】\n${secLines.join('\n')}\n`;
   });
 
   // 4. 主线剧情
