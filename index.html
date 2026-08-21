@@ -2631,6 +2631,7 @@ const DEFAULT_DATA = {
     baseUrl: 'https://api.deepseek.com',
     apiKey: '',
     model: 'deepseek-v4-flash',
+    chatModel: '',  // 对话模式专用模型（单人对话+群聊共用），空则跟随全局模型
     models: [],  // 自动拉取的模型列表，空则手填
     temperature: 0.85,  // 生成温度：越低越稳定，越高越有创意（0~2）
     frequencyPenalty: 0.4,  // 频率惩罚：抑制重复用词（0~2，越高越不重复）
@@ -2668,6 +2669,7 @@ let state = {
   chatSessionStartTime: 0,  // 当前轮对话开始的时间戳（用于顶部时间戳显示）
   isLoading: false,
   calendarLoading: false,  // 日历/事件生成中标志（事件线）
+  eventGenPhase: '',       // 事件链生成阶段标签（''|'narrative'|'summary'），驱动loading文案
   chatLoading: false,      // 聊天生成中标志（聊天线，独立于事件线：两条线可并发，互不清除对方的标志）
   isTyping: false,  // 打字动画是否应显示（跨页面切换后恢复；仅聊天线设置，与事件生成无关）
   currentTab: 'chat',
@@ -3283,6 +3285,7 @@ function resetRuntimeState() {
   state.quoteContext = null;
   state.isLoading = false;
   state.calendarLoading = false;
+  state.eventGenPhase = '';
   state.chatLoading = false;
   state.isTyping = false;
   state.rulesExpanded = true;
@@ -3930,8 +3933,8 @@ function buildModeInstruction(mode) {
       ? '类型：生活切片填 normal，关键剧情填 key，特殊NPC事件填 special'
       : '类型：生活切片填 normal，关键剧情填 key';
     const _rule4 = _hasSpecial
-      ? '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）也应侧面映衬主线氛围，不要与主线脱节。特殊NPC事件（special）指特殊NPC本人遭遇或卷入的事件，主角是该特殊NPC而非主控，需结合其人设和近期经历，不要与主线脱节。'
-      : '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）也应侧面映衬主线氛围，不要与主线脱节。';
+      ? '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）应结合故事背景、主角人设和主线剧情推进情况，通过侧面描写展示主角的生活，衬托主线剧情，不要写成与主线无关的日常流水账。特殊NPC事件（special）指特殊NPC本人遭遇或卷入的事件，主角是该特殊NPC而非主控，需结合其人设和近期经历，不要与主线脱节。'
+      : '关键剧情（key）应是推动主线发展的转折点。生活切片（normal）应结合故事背景、主角人设和主线剧情推进情况，通过侧面描写展示主角的生活，衬托主线剧情，不要写成与主线无关的日常流水账。';
     const _rule5 = _hasSpecial
       ? '一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。特殊NPC事件（special）的主角只能是以下特殊NPC，必须使用其真实姓名（禁止编造、近似或变体姓名，禁止引入新角色）：' + _specialNames + '。'
       : '一律使用人物姓名指代——主控角色用"' + _evtMe + '"，AI角色用"' + _evtOther + '"。';
@@ -4113,7 +4116,9 @@ async function callAI(userMessage, mode) {
 
   try {
     // 不设定 max_tokens，让 API 使用模型默认最大输出长度，避免内容截断
-    return await callWithRetry(() => callOpenAICompatible(messages, config), 1);
+    // 对话模式（单人聊天）可单独指定模型，未配置则跟随全局模型
+    const effConfig = (mode === 'chat' && config.chatModel) ? { ...config, model: config.chatModel } : config;
+    return await callWithRetry(() => callOpenAICompatible(messages, effConfig), 1);
   } catch(e) {
     console.error('AI调用失败', e);
     throw e;
@@ -5096,7 +5101,9 @@ async function callAIGroupChat(userMessage, grp, isAutoChat) {
     messages.push({ role: 'user', content: userMessage });
   }
 
-  return await callWithRetry(() => callOpenAICompatible(messages, config), 1);
+  // 群聊使用对话模式专用模型，未配置则跟随全局模型
+  const effConfig = config.chatModel ? { ...config, model: config.chatModel } : config;
+  return await callWithRetry(() => callOpenAICompatible(messages, effConfig), 1);
 }
 
 // 解析群聊AI回复
@@ -5378,12 +5385,6 @@ async function sendChatMessage() {
   } catch(e) {
     removeTypingIndicator();
     showToast('AI回复失败：' + (e.message || '未知错误'));
-    state.data.chatHistory.push({
-      role: 'assistant', content: '（回复失败，请检查API配置）',
-      timestamp: Date.now(), sessionId: state.chatSessionId
-    });
-    appendChatMessage(state.data.chatHistory.length - 1);
-    saveToStorage();
   } finally {
     state.chatLoading = false;
     // isLoading 恢复为事件线的真实状态：事件仍在生成时保持 true，避免守卫误开
@@ -5482,6 +5483,10 @@ async function regenerateMessage(idx) {
   // 移除该AI消息后，用空发送的逻辑重新生成
   const isAiInitiated = userInputIdx === -1;
 
+  // 记录原位置和会话归属，重新生成后原位插回（保持对话顺序，sessionId沿用原值避免凭空插入时间戳分隔线）
+  const originalSessionId = msg.sessionId;
+  const insertIdx = idx;
+
   // 从聊天记录中移除这条AI回复
   state.data.chatHistory.splice(idx, 1);
   saveToStorage();
@@ -5507,11 +5512,11 @@ async function regenerateMessage(idx) {
     removeTypingIndicator();
     const cleanReply = reply.trim();
     if (cleanReply) {
-      state.data.chatHistory.push({
+      state.data.chatHistory.splice(insertIdx, 0, {
         role: 'assistant', content: cleanReply,
-        timestamp: Date.now(), sessionId: state.chatSessionId
+        timestamp: Date.now(), sessionId: originalSessionId
       });
-      appendChatMessage(state.data.chatHistory.length - 1);
+      renderChat();
       saveToStorage();
     }
   } catch(e) {
@@ -5926,8 +5931,15 @@ function buildCalDailyNewsHtml() {
 // 日历状态UI (loading indicator for event generation)
 function buildCalendarStateHtml() {
   if (state.eventState === 'generating' && state.activeCalendarEvent) {
-    const chainEvents = state.data.eventHistory.filter(e => e.calendarEventId === state.activeCalendarEvent);
-    const label = chainEvents.length === 0 ? '生成前置剧情' : '润色中';
+    let label;
+    if (state.eventGenPhase === 'summary') {
+      label = '生成总结中';
+    } else if (state.eventGenPhase === 'narrative') {
+      label = '叙事生成中';
+    } else {
+      const chainEvents = state.data.eventHistory.filter(e => e.calendarEventId === state.activeCalendarEvent);
+      label = chainEvents.length === 0 ? '生成前置剧情' : '润色中';
+    }
     return `<div class="calendar-loading">${label}<span class="dots"><span></span><span></span><span></span></span></div>`;
   }
   return '';
@@ -6903,6 +6915,7 @@ async function sendCalendarEventWish() {
   state.isLoading = true;
   state.calendarLoading = true;
   state.eventState = 'generating';
+  state.eventGenPhase = '';  // 润色阶段（默认标签：已有链内容时显示"润色中"）
   updateCalendarStateUI();
 
   const evtId = 'evt_' + Date.now();
@@ -6911,6 +6924,8 @@ async function sendCalendarEventWish() {
 
   try {
     const polished = await callAI(wish, 'polish');
+    state.eventGenPhase = 'narrative';  // 切换为叙事阶段标签
+    updateCalendarStateUI();
     let narrative = await callAI(
       `【玩家的剧情愿望】\n<用户输入>${wish}</用户输入>\n\n【润色后的愿望文本（仅供参考，不要复述其中内容）】\n${polished}\n\n请基于玩家的愿望推进剧情，生成第三人称叙事文段。叙事必须从润色文本结束的地方继续推进，展开新的动作、对话、场景或情节发展，严禁复述或重复润色文本中已写过的任何句子、段落或场景描写。`,
       'event'
@@ -6943,6 +6958,7 @@ async function sendCalendarEventWish() {
   } finally {
     state.isLoading = false;
     state.calendarLoading = false;
+    state.eventGenPhase = '';
     const newInput = document.getElementById('event-input');
     if (newInput) newInput.focus();
   }
@@ -7303,7 +7319,7 @@ async function doRefreshNarrative(evtId, side) {
         if (calEvt) {
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
           const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-          const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n事件日期：${calEvt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生前的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生前的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
+          const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n事件日期：${calEvt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
           evt.aiNarrative = await callAI(prequelPrompt, 'event');
           const parsed = parseNarrativeAndState(evt.aiNarrative);
           evt.aiNarrative = parsed.narrative;
@@ -7804,6 +7820,7 @@ async function saveCalendarKeyEvent() {
   state.isLoading = true;
   state.calendarLoading = true;
   state.eventState = 'generating';
+  state.eventGenPhase = 'summary';  // 保存流程：显示"生成总结中"
   updateActiveEventHeaderButtons();
   renderActiveEventView();
 
@@ -7863,6 +7880,7 @@ async function saveCalendarKeyEvent() {
     saveToStorage();
     state.isLoading = false;
     state.calendarLoading = false;
+    state.eventGenPhase = '';
     state.eventState = 'readonly';
 
     // 渲染带总结的事件视图，保存按钮隐藏，用返回按钮退出
@@ -7873,6 +7891,7 @@ async function saveCalendarKeyEvent() {
     console.error('事件总结生成失败:', err);
     state.isLoading = false;
     state.calendarLoading = false;
+    state.eventGenPhase = '';
     // 失败时保留事件视图：已投递愿望回到 active（可继续投递），仅有前置铺垫回到 idle
     state.eventState = chainEvents.some(e => !e.isPrequel && !e.isSummary) ? 'active' : 'idle';
     renderActiveEventView();
@@ -8603,6 +8622,20 @@ function showApiConfig() {
     modelFieldHtml = `<input type="text" class="form-input" id="api-model" value="${escapeHtml(cfg.model)}" placeholder="输入或拉取模型名">`;
   }
 
+  // 对话模式专用模型：始终用下拉框。无列表时只有"跟随全局模型"和全局当前值两项，拉取后替换为完整列表
+  let chatOptions = `<option value="" ${cfg.chatModel ? '' : 'selected'}>跟随全局模型</option>`;
+  if (hasModels) {
+    cfg.models.forEach(m => {
+      chatOptions += `<option value="${escapeHtml(m)}" ${cfg.chatModel === m ? 'selected' : ''}>${escapeHtml(m)}</option>`;
+    });
+    if (cfg.chatModel && !cfg.models.includes(cfg.chatModel)) {
+      chatOptions = `<option value="${escapeHtml(cfg.chatModel)}" selected>${escapeHtml(cfg.chatModel)}</option>` + chatOptions;
+    }
+  } else if (cfg.chatModel && cfg.chatModel !== cfg.model) {
+    chatOptions += `<option value="${escapeHtml(cfg.chatModel)}" selected>${escapeHtml(cfg.chatModel)}</option>`;
+  }
+  const chatModelFieldHtml = `<select class="form-input" id="api-chat-model">${chatOptions}</select>`;
+
   document.getElementById('api-config-body').innerHTML = `
     <div class="form-group">
       <label class="form-label">API平台地址</label>
@@ -8619,6 +8652,10 @@ function showApiConfig() {
         <button class="modal-btn fetch-models-btn" id="fetch-models-btn" onclick="fetchModels()" style="white-space:nowrap;">拉取模型</button>
       </div>
       <div id="fetch-models-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;min-height:14px;"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">对话模式模型 <span style="font-size:11px;color:var(--text-dim);font-weight:400;">（仅单人对话与群聊使用，可选其他模型）</span></label>
+      ${chatModelFieldHtml}
     </div>
     <div class="form-group">
       <label class="form-label">温度 <span id="temp-value" style="color:var(--gold);">${(cfg.temperature != null ? cfg.temperature : 0.85).toFixed(2)}</span> <span style="font-size:11px;color:var(--text-dim);font-weight:400;">（低=稳定 · 高=创意）</span></label>
@@ -8678,6 +8715,19 @@ async function fetchModels() {
       select.innerHTML = options;
       modelWrap.replaceWith(select);
     }
+    // 同步刷新对话模式模型下拉，保留用户已选值（不在新列表则补一条）
+    const chatSel = document.getElementById('api-chat-model');
+    if (chatSel) {
+      const prev = chatSel.value;
+      let chatOptions = `<option value="" ${prev ? '' : 'selected'}>跟随全局模型</option>`;
+      models.forEach(m => {
+        chatOptions += `<option value="${escapeHtml(m)}" ${prev === m ? 'selected' : ''}>${escapeHtml(m)}</option>`;
+      });
+      if (prev && !models.includes(prev)) {
+        chatOptions = `<option value="${escapeHtml(prev)}" selected>${escapeHtml(prev)}</option>` + chatOptions;
+      }
+      chatSel.innerHTML = chatOptions;
+    }
     showToast('已拉取 ' + models.length + ' 个模型');
   } catch(e) {
     if (statusEl) statusEl.textContent = '拉取失败：' + (e.message || '未知错误') + '（可手填模型名）';
@@ -8691,12 +8741,14 @@ function saveApiConfig() {
   const cfg = state.data.apiConfig;
   const keyEl = document.getElementById('api-key');
   const modelEl = document.getElementById('api-model');
+  const chatModelEl = document.getElementById('api-chat-model');
   const urlEl = document.getElementById('api-baseurl');
   const tempEl = document.getElementById('api-temperature');
   const freqEl = document.getElementById('api-frequency-penalty');
   const presEl = document.getElementById('api-presence-penalty');
   if (keyEl) cfg.apiKey = keyEl.value.trim();
   if (modelEl) cfg.model = modelEl.value.trim();
+  if (chatModelEl) cfg.chatModel = chatModelEl.value.trim();
   if (urlEl) cfg.baseUrl = urlEl.value.trim();
   if (tempEl) cfg.temperature = parseFloat(tempEl.value);
   if (freqEl) cfg.frequencyPenalty = parseFloat(freqEl.value);
