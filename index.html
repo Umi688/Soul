@@ -1906,8 +1906,8 @@ html:-webkit-full-screen #app{
   color:var(--gold);
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.5),0 3px 12px rgba(26,43,60,0.14);
 }
-/* NPC编辑弹窗右上角的星标开关：星标NPC进入晨报羁绊板块的选择池 */
-.npc-star-btn{
+/* NPC编辑弹窗右上角的停用开关：标记停用的NPC不参与日历特殊NPC事件和晨报羁绊模块 */
+.npc-disable-btn{
   position:absolute;
   right:12px;
   top:50%;
@@ -1925,11 +1925,11 @@ html:-webkit-full-screen #app{
   color:var(--text-faint);
   transition:all 0.3s var(--ease);
 }
-.npc-star-btn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
-.npc-star-btn:hover{color:var(--text-dim);}
-.npc-star-btn:active{transform:translateY(-50%) scale(0.92);}
-.npc-star-btn.on{color:var(--gold);}
-.npc-star-btn.on svg{fill:currentColor;}
+.npc-disable-btn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.npc-disable-btn:hover{color:var(--text-dim);}
+.npc-disable-btn:active{transform:translateY(-50%) scale(0.92);}
+.npc-disable-btn.on{color:#c44;}
+.npc-disable-btn.on svg{fill:currentColor;}
 /* 拉取模型按钮：与输入框 1:3 分布 → 宽度为原 flex:1 布局的一半 */
 .fetch-models-btn{
   flex:1;
@@ -2823,6 +2823,12 @@ function normalizeNpcModel() {
   if (!d.characters) d.characters = {};
   if (!d.characters.me) d.characters.me = {name:'',gender:'',age:'',avatar:'',oneLiner:'',identity:'',appearance:'',personality:'',background:'',other:''};
   if (!Array.isArray(d.characters.npcs)) d.characters.npcs = [];
+  // NPC 字段迁移：清理旧版 starred（星标），补 disabled 默认值（停用开关）
+  d.characters.npcs.forEach(n => {
+    if (!n) return;
+    if ('starred' in n) delete n.starred;
+    if (typeof n.disabled !== 'boolean') n.disabled = false;
+  });
   // 清理旧版工作副本 characters.other（已废弃，直接从 npcs[] 读取激活NPC）
   if (d.characters.other) delete d.characters.other;
   if (!d.npcChats || typeof d.npcChats !== 'object' || Array.isArray(d.npcChats)) d.npcChats = {};
@@ -3844,12 +3850,10 @@ function buildHistoryMessages(mode, isContinuation) {
   return [...cross, ...primary];
 }
 
-// 羁绊板块选人：星标NPC优先随机取3；不足3位时从未标记的特殊NPC里随机补足至3
-// 星标仅作用于羁绊模块，其余模块仍使用全部NPC列表
-function pickConnectionNpcs() {
-  const npcs = (state.data.characters.npcs || []).filter(n => n.name);
-  const starred = npcs.filter(n => n.starred);
-  const rest = npcs.filter(n => !n.starred);
+// 从未停用NPC池子里随机抽取最多3个，供日历特殊NPC事件和晨报羁绊模块共用
+// 标记「停用」(disabled)的NPC被排除；该约束仅作用于特殊NPC事件与羁绊模块，其余模块仍使用全部NPC
+function pickActiveNpcs() {
+  const npcs = (state.data.characters.npcs || []).filter(n => n.name && !n.disabled);
   const shuffle = arr => {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -3858,9 +3862,7 @@ function pickConnectionNpcs() {
     }
     return a;
   };
-  const picked = shuffle(starred).slice(0, 3);
-  if (picked.length < 3) picked.push(...shuffle(rest).slice(0, 3 - picked.length));
-  return picked;
+  return shuffle(npcs).slice(0, 3);
 }
 
 // L8 模式指令：根据 mode 动态注入
@@ -3882,17 +3884,17 @@ function buildModeInstruction(mode) {
     const _npcs = (state.data.characters.npcs || []).filter(n => n.name);
     const _npcListStr = _npcs.length ? _npcs.map(n => n.name).join('、') : '（无NPC）';
     // 注：NPC完整人设已由 System Prompt L4 注入，此处仅保留姓名列表用于约束
-    // 羁绊板块专用池：星标NPC随机3个；不足3位时从未标记的特殊NPC随机补足（星标仅作用于羁绊板块）
-    const _connNpcs = pickConnectionNpcs();
+    // 羁绊板块专用池：从未停用NPC池随机抽3个（停用NPC不参与羁绊模块）
+    const _connNpcs = pickActiveNpcs();
     const _connNpcListStr = _connNpcs.length ? _connNpcs.map(n => n.name).join('、') : '（无特殊NPC）';
     const _connSection = _connNpcs.length
-      ? '（' + _connNpcs.length + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。此处只能出现以下特殊NPC（SpecialNPC），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _connNpcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）'
+      ? '（' + _connNpcs.length + '条特殊NPC关系进展，每条格式：NPC姓名|||印象与关系进展描述。每位特殊NPC仅出现1条，禁止同一NPC重复出现。本月羁绊板块仅涉及以下特殊NPC（从全部特殊NPC中选出的本月子集，其余特殊NPC本月不参与羁绊板块），必须使用其真实姓名，禁止编造、近似或变体姓名，禁止引入新角色，禁止使用NPC和路人：' + _connNpcListStr + '。描述该特殊NPC对主控的印象及近期关系变化）'
       : '（本月无羁绊进展：当前没有特殊NPC。仅保留===CONNECTION===标记，标记后不输出任何条目，下一板块直接从===NEWS===开始）';
     return '\n【当前模式：晨报全部内容生成】\n规则：\n1. 人物分三类，严格区分不得混用：\n  ①特殊NPC（SpecialNPC）：在以下列表中的角色，剧情整体围绕主控、主线剧情和特殊NPC展开，对剧情有重要推进作用：' + _npcListStr + '\n  ②NPC：不在列表、但在事件里出现过的角色，之后也可能继续出现在事件里，对剧情有推进作用。\n  ③路人：完全随机生成的路人甲，仅用于晨报中发表评论（SOCIAL舆论、NEWS评论），之后不会再出现，也不计入历史上下文。\n2. 一次性生成晨报6个板块，严格按以下顺序和格式输出，各板块以指定标记开头：\n\n===MEMO===\n（4条备忘录，每条占一行。备忘录是主控"' + _aMe + '"本月记在心上、需要处理或跟进的事：与特殊NPC和NPC之间的约定、待办事务、悬而未决的线索。每条须结合故事背景、人设、主线推进情况和近期经历，从近期时间线事件或聊天中自然延伸，不要写脱离经历的通用事项。至少1条与主线当前阶段或核心冲突直接相关。）\n\n===NOTIFICATION===\n（3条突发事件，每条占一行。突发事件是主控被动遭遇、刚刚发生或正在发生的意外：特殊NPC和NPC带来的突发消息、主控与某NPC之间骤起的意外状况、生活里的突发变故。与备忘录区分：备忘是主控要主动处理的事，通知是外界突然砸过来的意外，两板块不得写同类内容。每条须结合人设、主线推进和近期经历，不要写脱离经历的通用意外。至少1条反映主线推进引发的涟漪。）\n\n===MENU===\n（3条餐食，每条格式：餐型|||食物名称|||地点或来源|||主控想法。餐型从早餐/午餐/下午茶/晚餐/夜宵选取，来源体现主控与特殊NPC或NPC的互动）\n\n===SOCIAL===\n（3-5条舆论，每条格式：路人名|||舆论内容。路人名用随机身份如"茶馆老板娘""巡城卒甲""洗衣婢乙"等，内容50-100字，模拟路人的闲言碎语和看法，至少1条涉及主线社交反响）\n\n===CONNECTION===\n' + _connSection + '\n\n===NEWS===\n（3条新闻，每条格式：类型|||标题|||正文|||评论1路人名：评论1内容|||评论2路人名：评论2内容|||评论3路人名：评论3内容。类型从"时事热点""业界要文""八卦密谈""市井百态""法治要闻""吉凶祸福"六种中随机选取，可以重复。评论2-3条，路人名用随机身份如"街口卖烧饼的王二""路过的小厮"等。新闻条目之间用 ~~~ 分隔）\n\n3. 人物姓名规则：主控角色用"' + _aMe + '"。特殊NPC（SpecialNPC）指代时请使用以下真实姓名（禁止近似/变体）：' + _npcListStr + '。NPC可使用其在事件中出现时的名字。路人为一次性随机身份，不重复使用。\n4. 紧扣人设和近期经历，不要写空泛的通用内容。各板块内容应自然关联但不要重复。\n5. 只按上述格式输出，不要加任何额外说明或标题。各板块之间不要输出 ===MODULE=== 或任何其他分隔符。\n';
   } else if (mode === 'calendarEvents') {
     const _evtMe = (state.data.characters.me.name || '').trim() || '主控';
     const _evtOther = (getActiveNpc().name || '').trim() || 'AI角色';
-    const _specialNpcs = (state.data.characters.npcs || []).filter(n => n.name);
+    const _specialNpcs = pickActiveNpcs();
     const _hasSpecial = _specialNpcs.length > 0;
     const _specialNames = _specialNpcs.map(n => n.name).join('、');
     const _rule1 = _hasSpecial
@@ -8333,13 +8335,13 @@ function saveMainStory() {
 let editorCharType = null;
 let editorPendingAvatar = null; // temp avatar preview, committed on save
 let editorNpcId = null;          // 编辑NPC时记录目标id；null=新增NPC或非NPC编辑
-let editorNpcStarred = false;    // 编辑NPC时的星标暂存（随表单一起保存，取消不生效）
+let editorNpcDisabled = false;   // 编辑NPC时的停用暂存（随表单一起保存，取消不生效）
 
-// 星标开关：星标NPC进入晨报羁绊板块的选择池，仅作用于羁绊生成，其余逻辑不变
-function toggleNpcStar() {
-  editorNpcStarred = !editorNpcStarred;
-  const btn = document.getElementById('npc-star-btn');
-  if (btn) btn.classList.toggle('on', editorNpcStarred);
+// 停用开关：标记停用的NPC不参与日历特殊NPC事件和晨报羁绊模块，其余逻辑不变
+function toggleNpcDisable() {
+  editorNpcDisabled = !editorNpcDisabled;
+  const btn = document.getElementById('npc-disable-btn');
+  if (btn) btn.classList.toggle('on', editorNpcDisabled);
 }
 
 // 从好友列表头像进入NPC设定：npcId 为空表示新增
@@ -8383,21 +8385,21 @@ function openCharacterEditor(type, npcId) {
   } else {
     return;
   }
-  editorNpcStarred = !!(editorNpcId && c.starred);
+  editorNpcDisabled = !!(editorNpcId && c.disabled);
 
   const avatarHtml = c.avatar
     ? `<img src="${c.avatar}" alt="头像">`
     : `<span class="avatar-frame-placeholder">${escapeHtml(getAvatarChar(c.name, avatarFallback))}</span>`;
 
   const hintHtml = c.avatar ? '更换头像' : '点击上传';
-  // 星标开关仅编辑已有NPC时显示（新增NPC保存后再标记）
-  const starBtnHtml = editorNpcId
-    ? `<button class="npc-star-btn${editorNpcStarred ? ' on' : ''}" id="npc-star-btn" onclick="toggleNpcStar()" title="${editorNpcStarred ? '已标记：进入晨报羁绊选择池（点击取消）' : '标记：进入晨报羁绊选择池'}"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></button>`
+  // 停用开关仅编辑已有NPC时显示（新增NPC保存后再标记）
+  const disableBtnHtml = editorNpcId
+    ? `<button class="npc-disable-btn${editorNpcDisabled ? ' on' : ''}" id="npc-disable-btn" onclick="toggleNpcDisable()" title="${editorNpcDisabled ? '已停用：不参与日历特殊NPC事件和羁绊模块（点击恢复）' : '停用：标记后不参与日历特殊NPC事件和羁绊模块'}"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg></button>`
     : '';
 
   showModal(`
     <div class="modal">
-      <div class="modal-header">${title}${starBtnHtml}</div>
+      <div class="modal-header">${title}${disableBtnHtml}</div>
       <div class="modal-body">
         <div class="avatar-picker">
           <div class="avatar-frame" onclick="document.getElementById('avatar-file-input').click()">
@@ -8539,7 +8541,7 @@ function saveCharacter(type) {
         npc.oneLiner = fields.oneLiner; npc.appearance = fields.appearance;
         npc.personality = fields.personality; npc.background = fields.background; npc.other = fields.other;
         if (fields.avatar !== undefined) npc.avatar = fields.avatar;
-        npc.starred = editorNpcStarred;
+        npc.disabled = editorNpcDisabled;
       }
     } else {
       // 新增NPC
@@ -8548,7 +8550,7 @@ function saveCharacter(type) {
         return;
       }
       const newId = 'npc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-      const npc = Object.assign({ id: newId }, fields);
+      const npc = Object.assign({ id: newId, disabled: false }, fields);
       state.data.characters.npcs.push(npc);
       // 若当前没有激活NPC，自动激活新建的
       if (!state.data.activeNpcId) {
