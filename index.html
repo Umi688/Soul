@@ -2612,8 +2612,7 @@ const DEFAULT_DATA = {
   calendarMonth: '',    // 当前游戏月份 '第x年x月'，空=未开始
   calendarMonthStartedAt: 0,  // 当前游戏月开始时的真实时间戳（Date.now()），用于过滤当月聊天记录
   calendarPrevMonthStartedAt: 0,  // 上月（刚结束月）开始时间戳：晨报/日历生成的聊天窗口下界
-  calendarMonthReport: '',  // AI生成的当月晨报文本
-  calendarArchives: [],  // 过往晨报页归档 [{id, month, monthReport, memos, notifications, menu, social, connections, dailyNews}]
+  calendarArchives: [],  // 过往晨报页归档 [{id, month, memos, notifications, menu, social, connections, dailyNews}]
   calendarTimelineArchives: [],   // 过往日历页归档 [{id, month, events:[], cards:[]}]
   calendarTimelineCards: [],      // 当前月记忆卡片
   calendarMemos: [],        // MEMO/备忘：主控的4条备忘录 [string]
@@ -2836,7 +2835,6 @@ function normalizeNpcModel() {
   if (typeof d.calendarMonth !== 'string') d.calendarMonth = '';
   if (typeof d.calendarMonthStartedAt !== 'number') d.calendarMonthStartedAt = 0;
   if (typeof d.calendarPrevMonthStartedAt !== 'number') d.calendarPrevMonthStartedAt = 0;
-  if (typeof d.calendarMonthReport !== 'string') d.calendarMonthReport = '';
   if (!Array.isArray(d.calendarArchives)) d.calendarArchives = [];
   if (!Array.isArray(d.calendarTimelineArchives)) d.calendarTimelineArchives = [];
   if (!Array.isArray(d.calendarTimelineCards)) d.calendarTimelineCards = [];
@@ -3825,22 +3823,28 @@ function buildHistoryMessages(mode, isContinuation) {
     // 跨模块剧情注入：故事状态快照已在 System Prompt 中注入（L7），此处不再重复注入事件全文
     // 避免旧事件叙事干扰AI对当前时间节点的感知
   } else if (mode === 'event') {
-    // 剧情模式：主上下文是剧情事件链，跨模块注入当月全部NPC对话
-    primary = state.data.eventHistory.flatMap(e => [
-      { role: 'user', content: `剧情愿望：${e.wish}` },
-      { role: 'assistant', content: e.aiNarrative }
-    ]).slice(-MAX_PRIMARY);
-    const chatCtx = collectMonthlyNpcChats();
+    // 剧情模式：主上下文是当前事件链（严格按链隔离，不带其他链的叙事片段）
+    // 跨链感知由 System Prompt L6 的结构化时间线/记忆卡提供
+    primary = state.data.eventHistory
+      .filter(e => e.calendarEventId === state.activeCalendarEvent)
+      .flatMap(e => [
+        { role: 'user', content: `剧情愿望：${e.wish}` },
+        { role: 'assistant', content: e.aiNarrative }
+      ]).slice(-MAX_PRIMARY);
+    const chatCtx = collectRecentChats();
     if (chatCtx) {
       cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态和约定，叙事中可自然承接）】\n${chatCtx}` });
     }
   } else if (mode === 'polish') {
-    // 润色模式：注入近期剧情叙事作为上下文，确保润色文本与上文衔接
-    primary = state.data.eventHistory.flatMap(e => [
-      { role: 'user', content: `剧情愿望：${e.polishedWish || e.wish || ''}` },
-      { role: 'assistant', content: e.aiNarrative || '' }
-    ]).slice(-MAX_PRIMARY);
-    const chatCtx = collectMonthlyNpcChats();
+    // 润色模式：主上下文是当前事件链（严格按链隔离，确保润色衔接本链上文）
+    // 跨链感知由 System Prompt L6 的结构化时间线/记忆卡提供
+    primary = state.data.eventHistory
+      .filter(e => e.calendarEventId === state.activeCalendarEvent)
+      .flatMap(e => [
+        { role: 'user', content: `剧情愿望：${e.polishedWish || e.wish || ''}` },
+        { role: 'assistant', content: e.aiNarrative || '' }
+      ]).slice(-MAX_PRIMARY);
+    const chatCtx = collectRecentChats();
     if (chatCtx) {
       cross.push({ role: 'user', content: `【近期聊天记录（供你感知当前关系状态，勿在叙事中复述）】\n${chatCtx}` });
     }
@@ -3874,7 +3878,7 @@ function buildModeInstruction(mode) {
   } else if (mode === 'event') {
     return '\n【当前模式：事件叙事】\n规则：\n1.严格使用第三人称叙述。指代主控角色一律使用主控角色的姓名（或"他/她"），指代AI角色一律使用AI角色的姓名（或"他/她"）。全文禁止出现"你""你的""你们"等任何第二人称代词。\n2. 围绕玩家的愿望展开，不要替玩家做重大决定。\n3. 严禁复述或重复上文已出现过的内容（包括润色文本、历史叙事、聊天记录中的任何句子、段落或场景描写）。叙事必须从已有内容的结束处继续推进，只写新的发展。\n4. 叙事应自然延伸当前状态：综合初始人设 + 记忆卡片中的历史变化。若历史已记录角色状态的偏移，叙事中应延续该偏移，不退回初始状态。\n5.若有心理活动：小段插入第一人称或自由间接引语呈现角色当下的内心独白、回忆、矛盾、独白塑造情感冲突（如自责与不甘交织、想追问又克制、甜蜜回忆与当下苦涩对比）。\n6.格式要求：心理活动用「」括起来，对话内容则用""括起来。段落之间用换行分隔，不要挤在一起。\n';
   } else if (mode === 'polish') {
-    return '\n【当前模式：润色】\n规则：\n1. 本模式下你不是在扮演AI角色，而是作为第三人称叙事者。叙事视角主体是主控角色。\n2. 玩家输入的是基于主控角色自身角度的剧情愿望、反应或期望的发展。将其润色为以主控为视角焦点的小说风格叙事文段。保留玩家原意的核心。\n3. 严格使用第三人称叙述。玩家输入中的"我"一律替换为主控角色的姓名（或"他/她"），指代AI角色时一律使用AI角色的姓名（或"他/她"）。全文禁止出现"你""你的""你们"等任何第二人称代词。\n4. 润色文本默认应从上条叙事文本或润色文本的结束处自然衔接，延续当前场景和时空。严禁复述或重复上文已出现过的内容。\n5.若有心理活动：小段插入第一人称或自由间接引语呈现角色当下的内心独白、回忆、矛盾、独白塑造情感冲突（如自责与不甘交织、想追问又克制、甜蜜回忆与当下苦涩对比）。\n6.格式要求：心理活动用「」括起来，对话内容用""括起来。段落之间用换行分隔，不要挤在一起。\n7.只输出润色后的文段，不加任何说明。\n';
+    return '\n【当前模式：润色】\n规则：\n1. 本模式下你不是在扮演AI角色，而是作为第三人称叙事者。叙事视角主体是主控角色。\n2. 玩家输入的是基于主控角色自身角度的剧情愿望、反应或期望的发展。将其润色为以主控为视角焦点的小说风格叙事文段。保留玩家原意的核心。\n3. 严格使用第三人称叙述。玩家输入中的"我"一律替换为主控角色的姓名（或"他/她"），指代AI角色时一律使用AI角色的姓名（或"他/她"）。全文禁止出现"你""你的""你们"等任何第二人称代词。\n4. 润色文本默认应从上条叙事文本结束处自然衔接，根据剧情愿望自然延续当前场景和时空。严禁复述或重复上文已出现过的内容。\n5.若有心理活动：小段插入第一人称或自由间接引语呈现角色当下的内心独白、回忆、矛盾、独白塑造情感冲突（如自责与不甘交织、想追问又克制、甜蜜回忆与当下苦涩对比）。\n6.格式要求：心理活动用「」括起来，对话内容用""括起来。段落之间用换行分隔，不要挤在一起。\n7.只输出润色后的文段，不加任何说明。\n';
   } else if (mode === 'eventNarrative') {
     const _memMe = (state.data.characters.me.name || '').trim() || '主控';
     const _memOther = (getActiveNpc().name || '').trim() || 'AI角色';
@@ -3928,16 +3932,16 @@ function buildStoryStatePrompt() {
   return '\n【当前故事状态（供你内在感知剧情进展）】\n' + ss.trim() + '\n';
 }
 
-// L6 时间线上下文（辅助层，置于快照之前）：日历时间轴与晨报三板块
-// 供聊天/群聊感知具体事件细节（快照只有五维概述，细节断层在此补齐）
-// 取数只用固定数据，不读记忆卡片池（那是展示给玩家的UI）：
-//   日历线关键事件总结 → 保存时写回事件自身的 e.summary
-//   晨报线关键事件总结 → 事件链总结记录（当月在 eventHistory，归档月在 calendarTimelineArchives[].eventHistory 的 isSummary 条目）
-// 日历注入日常事件全文+关键事件总结；晨报只取备忘/通知/羁绊，备忘/通知触发过已保存事件链的附上总结记忆卡
-// scope：'chat'（默认）= 近2个月归档+当月，供聊天/群聊
+// L6 时间线上下文（辅助层，置于快照之前）：日历时间轴、晨报羁绊与记忆卡
+// 供对话/叙事感知具体事件细节（快照只有五维概述，细节断层在此补齐）
+// 取数只用固定数据，不读记忆卡片池UI：日历线关键事件总结取保存时写回的事件自身 e.summary
+// scope：'narrative' = 叙事/润色：近2月归档（时间轴+晨报记忆卡+羁绊）+ 当月记忆卡；
+//                          不注入当月时间轴与当月羁绊（当月已保存关键事件由当月记忆卡覆盖，避免重复）
+//        'chat'（默认）= 聊天/群聊：近2个月归档+当月（时间轴+羁绊），晨报只取羁绊（备忘/通知不注入）
 //        'calendar' = 仅近3个月归档、不含当月，供日历/晨报生成与刷新（当月内容即将重新生成，注入会自我循环）
 function buildTimelineContextPrompt(scope) {
   const isCalendar = scope === 'calendar';
+  const isNarrative = scope === 'narrative';
   const months = isCalendar ? 3 : 2;
   let ctx = '';
 
@@ -3968,9 +3972,9 @@ function buildTimelineContextPrompt(scope) {
     });
   }
 
-  // 2. 当月时间轴（日历线事件；日历/晨报生成不注入当月）
+  // 2. 当月时间轴（日历线事件；仅聊天模式注入。叙事模式当月只取记忆卡；日历/晨报生成不注入当月）
   const currentMonth = state.data.calendarMonth || '当月';
-  if (!isCalendar) {
+  if (!isCalendar && !isNarrative) {
     const currentEvents = state.data.calendarEvents || [];
     const hasCurrent = currentEvents.some(e => e.isKey ? e.summary : true);
     if (hasCurrent) {
@@ -3982,25 +3986,10 @@ function buildTimelineContextPrompt(scope) {
     }
   }
 
-  // 3. 晨报三板块（归档月份；对话模式另含当月）
-  // 某月晨报 → 注入文本；备忘/通知触发过已保存事件链的，附上该事件的总结记忆卡（保存时生成的总结，与记忆卡片内容一致）
-  const morningBlock = (month, memos, notifications, connections, history) => {
-    const getChainSummary = (type, index) => {
-      const evtId = `morning_${type}_${index}_${month}`;
-      const s = (history || []).find(e => e.calendarEventId === evtId && e.isSummary);
-      return s && s.aiNarrative ? s.aiNarrative.trim() : '';
-    };
+  // 3. 晨报羁绊板块（归档月份；对话模式另含当月）
+  // 仅注入羁绊文本，备忘/通知不注入（避免新晨报复述旧备忘/通知）
+  const morningBlock = (month, connections) => {
     const lines = [];
-    (memos || []).forEach((m, i) => {
-      if (!m) return;
-      const sum = getChainSummary('memo', i);
-      lines.push(sum ? `备忘：${m.trim()}（该备忘已展开为关键事件，总结记忆卡：${sum}）` : `备忘：${m}`);
-    });
-    (notifications || []).forEach((n, i) => {
-      if (!n) return;
-      const sum = getChainSummary('notif', i);
-      lines.push(sum ? `通知：${n.trim()}（该通知已展开为关键事件，总结记忆卡：${sum}）` : `通知：${n}`);
-    });
     (connections || []).forEach(c => {
       if (c && c.pair) lines.push(`羁绊：${c.pair}——${c.text || ''}`);
     });
@@ -4009,19 +3998,48 @@ function buildTimelineContextPrompt(scope) {
 
   const calArchives = state.data.calendarArchives || [];
   const morningBlocks = calArchives.slice(-months).map(arch => {
-    const archTl = tlArchives.find(a => a.month === arch.month);
-    return morningBlock(arch.month, arch.memos, arch.notifications, arch.connections, (archTl && archTl.eventHistory) || []);
+    return morningBlock(arch.month, arch.connections);
   });
-  // 当月晨报未归档，直接读当前数据与当前事件链（仅对话模式；日历/晨报生成不含当月）
-  if (!isCalendar && ((state.data.calendarMemos || []).length || (state.data.calendarNotifications || []).length || (state.data.calendarConnections || []).length)) {
-    morningBlocks.push(morningBlock(currentMonth, state.data.calendarMemos, state.data.calendarNotifications, state.data.calendarConnections, state.data.eventHistory));
+  // 当月晨报未归档，直接读当前羁绊数据（仅聊天模式；叙事模式当月羁绊不注入；日历/晨报生成不含当月）
+  if (!isCalendar && !isNarrative && (state.data.calendarConnections || []).length) {
+    morningBlocks.push(morningBlock(currentMonth, state.data.calendarConnections));
   }
   const morningCtx = morningBlocks.filter(Boolean).join('');
   if (morningCtx) {
     ctx += `\n【近月晨报（背景信息，自然感知即可，勿主动复述）】\n${morningCtx}`;
   }
 
-  // 4. 更早月份：只注入记忆卡片（晨报线+日历线全部关键事件总结卡；旧归档无cards时回退到事件总结与事件链总结记录）
+  // 4. 近2月晨报记忆卡（仅叙事模式：晨报线关键事件已保存的总结卡；
+  //    日历线关键事件总结已由时间轴 e.summary 注入，此处不重复；旧归档无cards时回退到晨报事件链总结记录）
+  if (isNarrative) {
+    const cardBlocks = recentTl.map(arch => {
+      const cards = [];
+      ((arch.cards) || []).forEach(c => { if (c && c.isMorningSummary && c.content) cards.push(c.content.trim()); });
+      if (!cards.length) {
+        (arch.eventHistory || []).forEach(e => {
+          if (e.isSummary && e.aiNarrative && typeof e.calendarEventId === 'string' && e.calendarEventId.startsWith('morning_')) {
+            cards.push(e.aiNarrative.trim());
+          }
+        });
+      }
+      return cards.length ? `◆ ${arch.month}\n${cards.map(c => '·' + c).join('\n')}\n` : '';
+    }).filter(Boolean);
+    if (cardBlocks.length) {
+      ctx += `\n【近月晨报记忆卡（晨报关键事件总结）】\n${cardBlocks.join('')}`;
+    }
+  }
+
+  // 5. 当月记忆卡（仅叙事模式：日历线+晨报线当月已触发关键事件且已保存总结的记忆卡）
+  if (isNarrative) {
+    const currentCards = (state.data.calendarTimelineCards || [])
+      .filter(c => c && c.content && c.content.trim())
+      .map(c => '·' + c.content.trim());
+    if (currentCards.length) {
+      ctx += `\n【${currentMonth}记忆卡片（当月已保存的关键事件总结）】\n${currentCards.join('\n')}\n`;
+    }
+  }
+
+  // 6. 更早月份：只注入记忆卡片（晨报线+日历线全部关键事件总结卡；旧归档无cards时回退到事件总结与事件链总结记录）
   // 仅日历/晨报生成注入：对话窗口近3月已带全文细节，更远的历史只需保留总结级记忆
   if (isCalendar && tlArchives.length > months) {
     const oldBlocks = [];
@@ -4053,9 +4071,12 @@ function buildSystemPrompt(mode) {
   prompt += buildRulesPrompt();      // L3 外部规则（舞台背景，前置铺垫）
   prompt += buildCharacterPrompt();  // L4 人设库（后移，更接近对话）
   prompt += buildMainStoryPrompt();  // L5 主线剧情约束（高权重，后移）
-  if (mode === 'chat' || mode === 'event' || mode === 'polish') {
-    // L6 时间线上下文（辅助层）：聊天/事件链/润色注入当月+近2个月归档，置于快照之前
-    // 事件叙事可据此感知时间轴已发生事件与晨报背景，与剧情自然衔接
+  if (mode === 'event' || mode === 'polish') {
+    // L6 时间线上下文（辅助层）：叙事/润色注入近2月归档（时间轴+晨报记忆卡+羁绊）+当月记忆卡
+    // 事件叙事可据此感知已发生事件、晨报关键事件总结与关系背景，与剧情自然衔接
+    prompt += buildTimelineContextPrompt('narrative');
+  } else if (mode === 'chat') {
+    // L6 时间线上下文（辅助层）：聊天注入近2个月归档+当月（时间轴+羁绊），置于快照之前
     prompt += buildTimelineContextPrompt();
   } else if (mode === 'calendarAll' || mode === 'calendarEvents') {
     // L6 时间线上下文（辅助层）：日历/晨报生成与刷新注入近3个月归档（不含当月）
@@ -5985,9 +6006,7 @@ function renderCalendarArchive(container) {
   Object.keys(yearGroups).forEach(year => {
     html += `<div class="calendar-page-archive-year">${escapeHtml(year)}</div>`;
     yearGroups[year].forEach(a => {
-      const preview = a.monthReport
-        ? a.monthReport.substring(0, 40) + (a.monthReport.length > 40 ? '…' : '')
-        : ((a.memos && a.memos.length) ? a.memos.length + '条备忘录' : '点击查看');
+      const preview = (a.memos && a.memos.length) ? a.memos.length + '条备忘录' : '点击查看';
       html += `
       <div class="calendar-page-archive-card" onclick="viewCalendarArchivedMonth('${a.month}')">
         <div class="calendar-page-archive-month">${escapeHtml(a.month)}</div>
@@ -6008,11 +6027,6 @@ function renderCalendarArchivedMonth(container, month) {
   }
 
   let html = '';
-
-  // 晨报
-  if (archive.monthReport) {
-    html += `<div class="cal-section"><div class="cal-section-header"><span class="cal-section-title">晨报</span></div><div class="cal-section-body"><div class="cal-memo-item">${escapeHtml(archive.monthReport)}</div></div></div>`;
-  }
 
   // 备忘录
   const memos = archive.memos || [];
@@ -6095,7 +6109,7 @@ function renderCalendarArchivedMonth(container, month) {
     html += `</div>`;
   }
 
-  if (!archive.monthReport && !memos.length && !notifs.length && !menu.length && !social.length && !connections.length && !news.length) {
+  if (!memos.length && !notifs.length && !menu.length && !social.length && !connections.length && !news.length) {
     html += '<div class="memory-empty">该月无归档数据</div>';
   }
 
@@ -6322,7 +6336,7 @@ function renderCalendarInput() {
       const placeholder = state.eventState === 'active' ? '继续投递剧情愿望...' : '写下你的剧情愿望...';
       inputArea.classList.add('input-bar-active');
       inputArea.innerHTML = `
-        <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
+        <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)"></textarea>
         <button onmousedown="event.preventDefault()" onclick="sendCalendarEventWish()">投递</button>
       `;
       restoreEventInputDraft();
@@ -6339,26 +6353,36 @@ function renderCalendar() {
   renderCalendarInput();
 }
 
-// 当月全部NPC的对话记录（供事件链/润色跨模块注入）
-// 按当月开始时间戳过滤；超过6000字符时只保留最近部分（按行边界截断，避免截断在句子中间）
-function collectMonthlyNpcChats() {
+// 叙事/润色跨模块注入：上月+当月全部对话（NPC单聊+群聊）
+// 窗口=[上月起点, 现在)：上月全部 + 当月至今；群聊按 speakerName 标注发言人
+// 超过6000字符时只保留最近部分（按行边界截断）
+function collectRecentChats() {
   const npcs = state.data.characters.npcs || [];
   const meName = (state.data.characters.me.name || '').trim() || '主控';
-  const monthStart = state.data.calendarMonthStartedAt || 0;
+  const prevStart = state.data.calendarPrevMonthStartedAt || 0;
   const MAX_CHAT_CHARS = 6000;
+  const inWindow = m => m.content && m.content.trim() && (!m.timestamp || m.timestamp >= prevStart);
   let chatCtx = '';
   npcs.forEach(npc => {
     if (!npc.id || !npc.name) return;
-    const chat = getNpcChat(npc.id);
-    if (chat && chat.length) {
-      const monthly = chat.filter(m => m.content && m.content.trim() && (!m.timestamp || m.timestamp >= monthStart));
-      if (monthly.length) {
-        chatCtx += `与${npc.name}当月对话：\n`;
-        monthly.forEach(m => {
-          const speaker = m.role === 'assistant' ? npc.name : meName;
-          chatCtx += `${speaker}：${m.content}\n`;
-        });
-      }
+    const chats = (getNpcChat(npc.id) || []).filter(inWindow);
+    if (chats.length) {
+      chatCtx += `与${npc.name}近期对话：\n`;
+      chats.forEach(m => {
+        const speaker = m.role === 'assistant' ? npc.name : meName;
+        chatCtx += `${speaker}：${m.content}\n`;
+      });
+    }
+  });
+  (state.data.groupChats || []).forEach(grp => {
+    if (!grp.name) return;
+    const chats = (grp.chatHistory || []).filter(inWindow);
+    if (chats.length) {
+      chatCtx += `群聊「${grp.name}」近期对话：\n`;
+      chats.forEach(m => {
+        const speaker = m.role === 'assistant' ? (m.speakerName || '成员') : meName;
+        chatCtx += `${speaker}：${m.content}\n`;
+      });
     }
   });
   if (chatCtx.length > MAX_CHAT_CHARS) {
@@ -6811,7 +6835,7 @@ async function generateEventPrequel(evt) {
   try {
     const _meName = (state.data.characters.me.name || '').trim() || '主控';
     const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-    const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${evt.title}\n事件简述：${evt.desc}\n事件日期：${evt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
+    const prequelPrompt = `请为以下关键事件生成一段剧情描写（描述剧情发生时的场景）。\n\n事件标题：${evt.title}\n事件简述：${evt.desc}\n事件日期：${evt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
     let narrative = await callAI(prequelPrompt, 'event');
     const parsed = parseNarrativeAndState(narrative);
     narrative = parsed.narrative;
@@ -7056,7 +7080,7 @@ function buildSnapshotContext() {
       }
     }
   });
-  const MAX_SNAP_CHAT = 8000;
+  const MAX_SNAP_CHAT = 6000;
   if (chatContext.length > MAX_SNAP_CHAT) {
     const sliced = chatContext.slice(-MAX_SNAP_CHAT);
     const firstNewline = sliced.indexOf('\n');
@@ -7064,7 +7088,7 @@ function buildSnapshotContext() {
     chatContext = '（聊天记录过长，仅保留最近部分）\n' + cleanSlice;
   }
 
-  // 3. 晨报内容（注：monthReport 为历史遗留空字段，从不产出内容，不注入）
+  // 3. 晨报内容
   let calendarContext = '';
   if (state.data.calendarMemos && state.data.calendarMemos.length) {
     calendarContext += '当月备忘录：\n';
@@ -7084,6 +7108,7 @@ function buildSnapshotContext() {
     const secLines = [];
     if (arch.memos && arch.memos.length) secLines.push(`备忘录：${arch.memos.filter(Boolean).join('；')}`);
     if (arch.notifications && arch.notifications.length) secLines.push(`通知：${arch.notifications.filter(Boolean).join('；')}`);
+    if (arch.connections && arch.connections.length) secLines.push(`羁绊：${arch.connections.filter(c => c && c.pair).map(c => `${c.pair}——${c.text || ''}`).join('；')}`);
     if (secLines.length) calendarContext += `\n【${arch.month} 晨报】\n${secLines.join('\n')}\n`;
   });
 
@@ -7290,7 +7315,7 @@ async function doRefreshNarrative(evtId, side) {
         if (calEvt) {
           const _meName = (state.data.characters.me.name || '').trim() || '主控';
           const _otherName = (getActiveNpc().name || '').trim() || 'AI角色';
-          const prequelPrompt = `请为以下关键事件生成一段前置剧情（场景铺垫），为正式事件的发生做铺垫。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n事件日期：${calEvt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
+          const prequelPrompt = `请为以下关键事件生成一段剧情描写（描述剧情发生时的场景）。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n事件日期：${calEvt.date}\n\n要求：\n1. 严格使用第三人称叙述，指代主控角色用"${_meName}"，指代AI角色用"${_otherName}"。\n2. 描写事件发生时的场景、氛围、人物状态，自然引向事件的发生。\n3. 不要直接复述事件简述，而是展开事件发生时的细节。\n4. 200-400字，段落间用换行分隔。\n5. 心理活动用「」括起来，对话内容用""括起来。\n6. 只输出叙事文段，不加任何说明。`;
           evt.aiNarrative = await callAI(prequelPrompt, 'event');
           const parsed = parseNarrativeAndState(evt.aiNarrative);
           evt.aiNarrative = parsed.narrative;
@@ -7511,7 +7536,7 @@ function renderCalendarPageEventInput() {
     const placeholder = state.eventState === 'active' ? '继续投递剧情愿望...' : '写下你的剧情愿望...';
     actionsArea.classList.add('input-bar');
     actionsArea.innerHTML = `
-      <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendCalendarEventWish()}"></textarea>
+      <textarea id="event-input" data-event-id="${state.activeCalendarEvent}" rows="1" placeholder="${placeholder}" onfocus="scrollEventChainToBottom()" oninput="autoResizeInput(this)"></textarea>
       <button onmousedown="event.preventDefault()" onclick="sendCalendarEventWish()">投递</button>
     `;
     restoreEventInputDraft();
@@ -7941,12 +7966,11 @@ async function doAdvanceToNextMonth() {
       });
     }
 
-    // 晨报页归档：晨报 + 日历内容
-    if (state.data.calendarMonthReport || (state.data.calendarMemos && state.data.calendarMemos.length) || (state.data.calendarNotifications && state.data.calendarNotifications.length)) {
+    // 晨报页归档
+    if ((state.data.calendarMemos && state.data.calendarMemos.length) || (state.data.calendarNotifications && state.data.calendarNotifications.length)) {
       state.data.calendarArchives.push({
         id: 'ca_' + Date.now(),
         month: currentMonth,
-        monthReport: state.data.calendarMonthReport || '',
         memos: JSON.parse(JSON.stringify(state.data.calendarMemos || [])),
         notifications: JSON.parse(JSON.stringify(state.data.calendarNotifications || [])),
         menu: JSON.parse(JSON.stringify(state.data.calendarMenu || [])),
@@ -8006,7 +8030,6 @@ async function doAdvanceToNextMonth() {
 
     // 5. 替换当月数据（事件生成成功）
     state.data.calendarEvents = events;
-    state.data.calendarMonthReport = '';
     state.data.calendarTimelineCards = [];
     state.data.eventHistory = [];
     // 新月份重置共用快照备份（本月归档内容视作已发生，不回退；新月首次保存时重新备份）
