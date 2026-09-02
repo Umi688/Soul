@@ -7015,13 +7015,12 @@ function buildSnapshotContext() {
 
   const currentMonth = state.data.calendarMonth || '当月';
   timelineContext += `\n【${currentMonth} 日历事件概况】\n`;
-  const currentKeyEvents = (state.data.calendarEvents || []).filter(e => e.isKey);
+  // 已保存的关键事件才注入（未触发的关键事件不纳入，避免未来剧情剧透进快照）
+  const currentKeyEvents = (state.data.calendarEvents || []).filter(e => e.isKey && e.advanced);
   const currentSpecialEvents = (state.data.calendarEvents || []).filter(e => !e.isKey && e.type === 'special');
   const currentNormalEvents = (state.data.calendarEvents || []).filter(e => !e.isKey && e.type !== 'special');
-  // 排除当前正在保存的链：其全文已在任务一的【事件内容】注入，此处不重复
-  const currentChains = (state.data.eventHistory || []).filter(
-    e => !e.isSummary && !e.isPrequel && e.chainId !== state.currentChainId
-  );
+  // 链叙事全文一律不注入快照取数：正在保存的链全文已在任务一的【事件内容】中；
+  // 已保存的链由上方清单以"标题+简述+总结"形式注入；未保存的链不属于已确立的事实（保存时自带总结+快照）
 
   // 晨报关键事件：不在 calendarEvents 中，但从 eventHistory 中提取已保存的事件链
   const morningChainIds = [...new Set(
@@ -7059,11 +7058,8 @@ function buildSnapshotContext() {
   currentNormalEvents.forEach(e => {
     timelineContext += `生活切片：${e.title} - ${e.desc}\n`;
   });
-  currentChains.forEach(e => {
-    if (e.aiNarrative) timelineContext += `叙事片段：${e.aiNarrative}\n`;
-  });
 
-  // 2. 当月聊天记录
+  // 2. 当月聊天记录（NPC单聊+群聊）
   const monthStart = state.data.calendarMonthStartedAt || 0;
   let chatContext = '';
   npcs.forEach(npc => {
@@ -7078,6 +7074,17 @@ function buildSnapshotContext() {
           chatContext += `${speaker}：${m.content}\n`;
         });
       }
+    }
+  });
+  (state.data.groupChats || []).forEach(grp => {
+    if (!grp.name) return;
+    const monthly = (grp.chatHistory || []).filter(m => m.content && m.content.trim() && (!m.timestamp || m.timestamp >= monthStart));
+    if (monthly.length) {
+      chatContext += `群聊「${grp.name}」当月对话：\n`;
+      monthly.forEach(m => {
+        const speaker = m.role === 'assistant' ? (m.speakerName || '成员') : _meName;
+        chatContext += `${speaker}：${m.content}\n`;
+      });
     }
   });
   const MAX_SNAP_CHAT = 6000;
