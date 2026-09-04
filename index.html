@@ -4601,12 +4601,18 @@ function toggleGroupMember(npcId) {
 
 // 上传群头像
 function uploadGroupAvatar() {
+  // 清理上次遗留的隐形文件框（用户取消选择时 onchange 不会触发）
+  const old = document.getElementById('group-avatar-file-input');
+  if (old) old.remove();
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
+  input.id = 'group-avatar-file-input';
+  // 必须挂到页面且位于可视区内，手机浏览器才会响应 click 弹出文件选择器
+  input.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;';
   input.onchange = function(e) {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) { input.remove(); return; }
     const reader = new FileReader();
     reader.onload = function(ev) {
       _groupCreatorState.avatar = ev.target.result;
@@ -4617,9 +4623,12 @@ function uploadGroupAvatar() {
         preview.style.backgroundPosition = 'center';
         preview.innerHTML = '';
       }
+      input.remove();
     };
+    reader.onerror = function() { input.remove(); };
     reader.readAsDataURL(file);
   };
+  document.body.appendChild(input);
   input.click();
 }
 
@@ -5669,7 +5678,7 @@ function doSaveGroupMessage(idx) {
 // 日历模式：晨报 + 时间轴事件(5-10条, 1-3关键剧情可推进)
 // 关键剧情推进复用愿望→润色→叙事系统
 
-function buildEventBlockHtml(evt) {
+function buildEventBlockHtml(evt, isArchived) {
   const hasPlayer = evt.polishedWish || evt.wish;
   const hasAi = evt.aiNarrative;
   const playerBody = evt.polishedWish ? formatNarrativeText(evt.polishedWish) : (evt.wish ? formatNarrativeText(evt.wish) : '');
@@ -5678,17 +5687,26 @@ function buildEventBlockHtml(evt) {
   const isSummary = evt.isSummary;
   const aiTag = isSummary ? '事件总结' : (isPrequel ? '前置剧情' : '叙事');
   const aiExtraClass = isSummary ? ' summary' : (isPrequel ? ' prequel' : '');
+  // 归档链为只读视图：隐藏 EDIT/RETRY/DELETE（编辑函数只作用于当月数据）
+  const actionsHtml = isArchived ? '' : `
+          <div class="narr-card-header-actions">
+            <button class="narr-card-header-btn" onclick="editNarrative('${evt.id}','player')">EDIT</button>
+            <button class="narr-card-header-btn" onclick="refreshNarrative('${evt.id}','player')">RETRY</button>
+            <button class="narr-card-header-btn danger" onclick="deleteNarrative('${evt.id}','player')">DELETE</button>
+          </div>`;
+  const actionsAiHtml = isArchived ? '' : `
+          <div class="narr-card-header-actions">
+            <button class="narr-card-header-btn" onclick="editNarrative('${evt.id}','ai')">EDIT</button>
+            <button class="narr-card-header-btn" onclick="refreshNarrative('${evt.id}','ai')">RETRY</button>
+            <button class="narr-card-header-btn danger" onclick="deleteNarrative('${evt.id}','ai')">DELETE</button>
+          </div>`;
   let html = `<div class="narrative-block" data-id="${evt.id}">`;
   if (hasPlayer) {
     html += `
       <div class="narr-card player">
         <div class="narr-card-header">
           <span class="narr-card-tag">愿望</span>
-          <div class="narr-card-header-actions">
-            <button class="narr-card-header-btn" onclick="editNarrative('${evt.id}','player')">EDIT</button>
-            <button class="narr-card-header-btn" onclick="refreshNarrative('${evt.id}','player')">RETRY</button>
-            <button class="narr-card-header-btn danger" onclick="deleteNarrative('${evt.id}','player')">DELETE</button>
-          </div>
+          ${actionsHtml}
         </div>
         <div class="narr-card-body" id="player-narr-${evt.id}">${playerBody}</div>
         <div class="narr-card-actions" id="player-actions-${evt.id}"></div>
@@ -5699,11 +5717,7 @@ function buildEventBlockHtml(evt) {
       <div class="narr-card ai${aiExtraClass}">
         <div class="narr-card-header">
           <span class="narr-card-tag">${aiTag}</span>
-          <div class="narr-card-header-actions">
-            <button class="narr-card-header-btn" onclick="editNarrative('${evt.id}','ai')">EDIT</button>
-            <button class="narr-card-header-btn" onclick="refreshNarrative('${evt.id}','ai')">RETRY</button>
-            <button class="narr-card-header-btn danger" onclick="deleteNarrative('${evt.id}','ai')">DELETE</button>
-          </div>
+          ${actionsAiHtml}
         </div>
         <div class="narr-card-body" id="ai-narr-${evt.id}">${aiBody}</div>
         <div class="narr-card-actions" id="ai-actions-${evt.id}"></div>
@@ -5951,7 +5965,7 @@ function renderCalendarContent() {
       html += '<div class="memory-empty">该事件暂无剧情内容</div>';
     } else {
       chainEvents.forEach(evt => {
-        html += buildEventBlockHtml(evt);
+        html += buildEventBlockHtml(evt, !!state.archiveEventChain);
       });
     }
     html += `<div id="calendar-state-ui">${buildCalendarStateHtml()}</div>`;
@@ -7219,6 +7233,41 @@ ${calendarContext || '（无）'}
   return { summary: result.trim(), snapshot: '' };
 }
 
+// 事件链内的总结被编辑/重生成/删除后，同步日历事件与记忆卡片中的副本（三处保持一致）
+// oldText：修改前的总结原文，用于匹配旧数据中未带链接字段的卡片
+function syncSummaryCopies(evt, oldText) {
+  if (!evt || !evt.isSummary) return;
+  const text = evt.aiNarrative || '';
+  // 1) 日历事件自身的 summary（晨报事件不在 calendarEvents 中，自然跳过）
+  const calEvt = (state.data.calendarEvents || []).find(e => e.id === evt.calendarEventId);
+  if (calEvt) calEvt.summary = text;
+  // 2) 记忆卡片池：优先按 calendarEventId 匹配（新卡片），旧卡片回退按旧文本匹配
+  const cards = state.data.calendarTimelineCards || [];
+  let cardIdx = cards.findIndex(c => c.calendarEventId === evt.calendarEventId);
+  if (cardIdx === -1 && oldText) {
+    cardIdx = cards.findIndex(c => !c.calendarEventId && c.content === oldText);
+    // 内容匹配成功后回填链接字段，后续同步即可精确匹配
+    if (cardIdx !== -1) cards[cardIdx].calendarEventId = evt.calendarEventId;
+  }
+  if (text) {
+    if (cardIdx === -1) {
+      // 极少数情况：总结存在但卡片缺失（旧数据），补一张保持口径一致
+      cards.push({
+        id: 'mc_' + Date.now(),
+        content: text,
+        timestamp: Date.now(),
+        isMorningSummary: (evt.calendarEventId || '').indexOf('morning_') === 0,
+        calendarEventId: evt.calendarEventId
+      });
+    } else {
+      cards[cardIdx].content = text;
+    }
+  } else if (cardIdx !== -1) {
+    // 总结被删除：一并移除对应记忆卡
+    cards.splice(cardIdx, 1);
+  }
+}
+
 function editNarrative(evtId, side) {
   const evt = state.data.eventHistory.find(e => e.id === evtId);
   if (!evt) return;
@@ -7251,8 +7300,14 @@ function doSaveNarrativeEdit(evtId, side) {
   if (!ta) { closeModal(); return; }
   const evt = state.data.eventHistory.find(e => e.id === evtId);
   if (!evt) { closeModal(); return; }
-  if (side === 'ai') evt.aiNarrative = ta.value;
-  else evt.polishedWish = ta.value;
+  if (side === 'ai') {
+    const oldText = evt.aiNarrative;
+    evt.aiNarrative = ta.value;
+    // 总结被手动编辑：同步日历事件与记忆卡片中的副本
+    syncSummaryCopies(evt, oldText);
+  } else {
+    evt.polishedWish = ta.value;
+  }
   saveToStorage();
   // Update the single card body without full re-render
   const boxId = side === 'ai' ? `ai-narr-${evtId}` : `player-narr-${evtId}`;
@@ -7287,6 +7342,9 @@ async function doRefreshNarrative(evtId, side) {
   if (!evt) return;
   if (state.isLoading) return;
 
+  // 记录修改前的总结原文（用于同步旧数据记忆卡片）
+  const oldSummaryText = evt.aiNarrative;
+
   state.isLoading = true;
   state.calendarLoading = true;
   const boxId = side === 'ai' ? `ai-narr-${evtId}` : `player-narr-${evtId}`;
@@ -7314,6 +7372,8 @@ async function doRefreshNarrative(evtId, side) {
           });
           const summaryPrompt = `请根据以下关键事件的内容，生成一段事件总结（类似记忆卡片）。\n\n事件标题：${calEvt.title}\n事件简述：${calEvt.desc}\n\n事件内容：\n${eventContent}\n\n要求：\n1. 总结关键信息：重要事件、角色关系变化、人物状态演变。\n2. 尽量保留具体细节，如涉及的人物姓名、具体约定、关键道具、地点、转折点等，不要只写空泛的概括。\n3. 一段简洁的摘要，不超过400字。一律使用人物姓名指代——主控角色用"${_meName}"，AI角色用"${_otherName}"。\n4. 只记录已发生的事实，不加入推测或评价。\n5. 直接输出摘要正文，不要加任何标题、标记或说明。`;
           evt.aiNarrative = await callAI(summaryPrompt, 'eventNarrative');
+          // 总结重新生成：同步日历事件与记忆卡片中的副本
+          syncSummaryCopies(evt, oldSummaryText);
           state.data.pendingSessionBreak = true;
         }
       } else if (evt.isPrequel) {
@@ -7396,7 +7456,10 @@ function doDeleteNarrative(evtId, side) {
   if (!evt) return;
   // Clear the deleted side's content
   if (side === 'ai') {
+    const oldText = evt.aiNarrative;
     evt.aiNarrative = '';
+    // 总结被删除：同步清空日历事件与记忆卡片中的副本
+    syncSummaryCopies(evt, oldText);
   } else {
     evt.polishedWish = '';
     evt.wish = '';
@@ -7435,7 +7498,7 @@ function renderCalendarPage() {
       html += '<div class="memory-empty">该事件暂无剧情内容</div>';
     } else {
       chainEvents.forEach(evt => {
-        html += buildEventBlockHtml(evt);
+        html += buildEventBlockHtml(evt, !!state.archiveEventChain);
       });
     }
     html += `<div id="calendar-state-ui">${buildCalendarStateHtml()}</div>`;
@@ -7877,7 +7940,9 @@ async function saveCalendarKeyEvent() {
       id: 'mc_' + Date.now(),
       content: summary,
       timestamp: Date.now(),
-      isMorningSummary: isMorning || false
+      isMorningSummary: isMorning || false,
+      // 事件链接字段：编辑/重生成/删除总结时可精确同步本卡片（旧数据无此字段，靠内容匹配回退）
+      calendarEventId: state.activeCalendarEvent
     });
 
     saveToStorage();
@@ -8432,11 +8497,12 @@ function openCharacterEditor(type, npcId) {
       <div class="modal-header">${title}${disableBtnHtml}</div>
       <div class="modal-body">
         <div class="avatar-picker">
-          <div class="avatar-frame" onclick="document.getElementById('avatar-file-input').click()">
+          <div class="avatar-frame">
             ${avatarHtml}
             <div class="avatar-frame-hint">${hintHtml}</div>
+            <!-- 透明文件框直接覆盖整个头像框：点头像=点文件框（手机浏览器兼容，不走JS转发） -->
+            <input type="file" id="avatar-file-input" accept="image/*" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" onchange="handleAvatarUpload(event)">
           </div>
-          <input type="file" id="avatar-file-input" accept="image/*" style="position:absolute;top:-100px;left:0;width:1px;height:1px;opacity:0;overflow:hidden;" onchange="handleAvatarUpload(event)">
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -8794,11 +8860,12 @@ function showBackupModal() {
           <span>导出数据</span>
           <span style="font-size:11px;color:var(--text-dim);letter-spacing:0;text-indent:0;">下载备份文件</span>
         </button>
-        <button class="settings-action-btn" onclick="document.getElementById('import-file-input').click()" style="width:100%;display:flex;flex-direction:column;gap:2px;align-items:center;">
+        <label class="settings-action-btn" style="width:100%;display:flex;flex-direction:column;gap:2px;align-items:center;">
           <span>导入数据</span>
           <span style="font-size:11px;color:var(--text-dim);letter-spacing:0;text-indent:0;">从备份文件恢复</span>
-        </button>
-        <input type="file" id="import-file-input" accept=".json" style="position:absolute;top:-100px;left:0;width:1px;height:1px;opacity:0;overflow:hidden;" onchange="importData(event)">
+          <!-- 透明文件框直接覆盖整个按钮：点按钮=点文件框，原生唤起选择器（手机浏览器兼容，不走JS转发） -->
+          <input type="file" id="import-file-input" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" onchange="importData(event)">
+        </label>
       </div>
       <div class="modal-footer">
         <button class="modal-btn" onclick="closeModal()">关闭</button>
