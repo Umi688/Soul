@@ -1756,6 +1756,7 @@ html:-webkit-full-screen #app{
   border-radius:2px;
   color:var(--text);
   font-size:13px;
+  font-family:inherit; /* button默认不继承页面字体（会显示成黑体）；label则继承。统一继承正文衬线字体 */
   letter-spacing:3px;
   text-indent:3px;
   cursor:pointer;
@@ -2814,6 +2815,12 @@ function loadProfileIntoState(id) {
   applyGlobalsToState();
   // 结构归一化：确保所有必需字段存在
   normalizeNpcModel();
+  // 总结三副本对账：修复旧版本编辑总结后未同步事件字段/记忆卡的历史数据
+  // （含已冻结进归档月的失同步，链内记录为权威源）。有修复则立即落盘。
+  if (reconcileSummaryCopies()) {
+    saveToStorage();
+    console.log('[对账] 已修复总结副本失同步数据并落盘');
+  }
 }
 
 // 结构归一化：保证所有必需字段存在。每次装入 state.data 后调用。
@@ -7266,6 +7273,81 @@ function syncSummaryCopies(evt, oldText) {
     // 总结被删除：一并移除对应记忆卡
     cards.splice(cardIdx, 1);
   }
+}
+
+// ===== 总结三副本对账（载入存档时修复历史失同步数据） =====
+// 保存关键事件时总结写入三处：①链内记录(eventHistory 的 isSummary 记录)②事件字段
+// (calendarEvents[].summary / 归档 events[].summary)③记忆卡片(calendarTimelineCards / 归档 cards)。
+// 旧版本编辑/重生成/删除链内总结只改①，②③残留旧文本；过月归档时失同步状态被一并冻结。
+// 本函数以①为唯一权威源（用户唯一可编辑的副本）对账修复②③，覆盖当月与全部归档月。
+// 幂等：数据一致时不做任何改动。返回是否有修复。
+function reconcileSummaryCopies() {
+  const d = state.data;
+  if (!d) return false;
+
+  const reconcileMonth = (chains, eventsList, cardsList) => {
+    let changed = false;
+    (chains || []).forEach(rec => {
+      if (!rec || !rec.isSummary || !rec.calendarEventId) return;
+      const text = rec.aiNarrative || '';
+      // 1) 事件自身 summary（晨报链不在事件列表中，自然跳过）
+      const calEvt = (eventsList || []).find(x => x.id === rec.calendarEventId);
+      const oldText = calEvt ? (calEvt.summary || '') : '';
+      if (calEvt && oldText !== text) { calEvt.summary = text; changed = true; }
+      // 2) 记忆卡片：优先按链接字段匹配；其次按修复前的事件 summary 原文匹配（日历线）；
+      //    兜底按时间戳就近配对（总结记录与卡片在同一保存流程中先后创建，相差毫秒级；
+      //    晨报线无事件 summary 可对照，靠此法定位自己的卡片）。匹配成功即回填链接字段。
+      if (!Array.isArray(cardsList)) return;
+      let idx = cardsList.findIndex(c => c && c.calendarEventId === rec.calendarEventId);
+      if (idx === -1 && oldText) {
+        idx = cardsList.findIndex(c => c && !c.calendarEventId && c.content === oldText);
+        if (idx !== -1) { cardsList[idx].calendarEventId = rec.calendarEventId; changed = true; }
+      }
+      if (idx === -1 && rec.timestamp) {
+        let best = -1, bestDiff = Infinity;
+        cardsList.forEach((c, i) => {
+          if (!c || c.calendarEventId || !c.timestamp) return; // 已被认领/无时间戳的卡不参与
+          const diff = Math.abs(c.timestamp - rec.timestamp);
+          if (diff < bestDiff && diff <= 10000) { bestDiff = diff; best = i; }
+        });
+        if (best !== -1) {
+          idx = best;
+          cardsList[idx].calendarEventId = rec.calendarEventId;
+          changed = true;
+        }
+      }
+      if (text) {
+        if (idx === -1) {
+          // 卡片缺失（旧数据保存链路异常）：补一张保持口径一致
+          cardsList.push({
+            id: 'mc_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            content: text,
+            timestamp: Date.now(),
+            isMorningSummary: rec.calendarEventId.indexOf('morning_') === 0,
+            calendarEventId: rec.calendarEventId
+          });
+          changed = true;
+        } else if ((cardsList[idx].content || '') !== text) {
+          cardsList[idx].content = text;
+          changed = true;
+        }
+      } else if (idx !== -1) {
+        // 链内总结已被删除：连卡片一并移除
+        cardsList.splice(idx, 1);
+        changed = true;
+      }
+    });
+    return changed;
+  };
+
+  let changed = false;
+  // 当月
+  if (reconcileMonth(d.eventHistory, d.calendarEvents, d.calendarTimelineCards)) changed = true;
+  // 归档月（过月时 events/cards/eventHistory 深拷贝进归档，需逐月对账）
+  (d.calendarTimelineArchives || []).forEach(arch => {
+    if (reconcileMonth(arch.eventHistory, arch.events, arch.cards)) changed = true;
+  });
+  return changed;
 }
 
 function editNarrative(evtId, side) {
